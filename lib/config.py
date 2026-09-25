@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 DEFAULT_PORT = 6199
 DEFAULT_TIMEOUT = 15
@@ -46,6 +46,85 @@ def _as_list(value: Any) -> List[str]:
         if stripped and stripped not in result:
             result.append(stripped)
     return result
+
+
+# AstrBot 支持的会话类型（见 astrbot.core.platform.message_type.MessageType）。
+UMO_MESSAGE_TYPES = frozenset({"FriendMessage", "GroupMessage", "OtherMessage"})
+
+MAX_UMO_LENGTH = 512
+
+
+def parse_umo(value: Any) -> Optional[Tuple[str, str, str]]:
+    """把字符串解析为 (平台标识, 消息类型, 会话 ID)。
+
+    AstrBot 的 unified_msg_origin 形如 ``platform_id:MessageType:session_id``，
+    其中 platform_id 是平台适配器实例 ID（不一定等于适配器名）。
+
+    Args:
+        value: 待解析的取值，通常来自配置或请求体。
+
+    Returns:
+        形状合法时返回三元组，否则返回 None。
+    """
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > MAX_UMO_LENGTH or any(c.isspace() for c in candidate):
+        return None
+    parts = candidate.split(":", 2)
+    if len(parts) != 3 or not all(parts):
+        return None
+    platform_id, message_type, session_id = parts
+    if message_type not in UMO_MESSAGE_TYPES:
+        return None
+    return platform_id, message_type, session_id
+
+
+def umo_message_type(value: Any) -> str:
+    """返回会话类型；形状非法时返回空字符串。
+
+    调用方据此判断目标类型，避免直接对字符串做下标访问而越界。
+
+    Args:
+        value: 待解析的 unified_msg_origin。
+
+    Returns:
+        ``FriendMessage`` / ``GroupMessage`` / ``OtherMessage`` 之一，非法时为空串。
+    """
+    parsed = parse_umo(value)
+    return parsed[1] if parsed else ""
+
+
+def _as_umo_list(value: Any, message_type: str) -> List[str]:
+    """解析 UMO 列表，只保留指定消息类型的合法项。
+
+    管理员在 WebUI 里手写的 UMO 很容易缺少冒号或写错会话类型；这里直接丢弃
+    非法项（由调用方提示），避免畸形取值进入推送链路。
+
+    Args:
+        value: 配置中的原始取值。
+        message_type: 期望的会话类型，如 ``GroupMessage``。
+
+    Returns:
+        去重后的合法 UMO 列表。
+    """
+    return [item for item in _as_list(value) if umo_message_type(item) == message_type]
+
+
+def dropped_umo_values(value: Any, message_type: str) -> List[str]:
+    """返回配置里被判定为指定会话类型之外、因而被忽略的取值。
+
+    供启动日志使用：管理员写错 UMO 时原本会静默失效，这里让问题可见。
+
+    Args:
+        value: 配置中的原始取值。
+        message_type: 期望的会话类型，如 ``GroupMessage``。
+
+    Returns:
+        被丢弃的原始字符串列表。
+    """
+    return [item for item in _as_list(value) if umo_message_type(item) != message_type]
+
 
 
 @dataclass
@@ -112,7 +191,7 @@ class VoiceHubConfig:
             message_prefix=str(data.get("message_prefix") or "").strip(),
             include_url=_as_bool(data.get("include_url"), True),
 
-            group_umos=_as_list(data.get("group_umos")),
+            group_umos=_as_umo_list(data.get("group_umos"), "GroupMessage"),
 
             request_timeout_seconds=_as_int(data.get("request_timeout_seconds"), DEFAULT_TIMEOUT),
             voicehub_base_url=str(data.get("voicehub_base_url") or "").strip().rstrip("/"),

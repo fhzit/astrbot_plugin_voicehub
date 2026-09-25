@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
-from .lib.config import VoiceHubConfig
+from .lib.config import VoiceHubConfig, dropped_umo_values
 from .lib.push import PushService
 from .lib.server import VoiceHubHttpServer
 from .lib.voicehub import VoiceHubClient
@@ -43,6 +43,18 @@ class VoiceHubPlugin(Star):
                 "请在插件配置中填写与 VoiceHub 一致的令牌。"
             )
             return
+
+        # group_umos 在加载时已过滤非法项；此处提示被丢弃的取值，避免管理员
+        # 以为群广播已生效却收不到消息（例如漏写冒号或会话类型写错）。
+        raw_config = self.raw_config if isinstance(self.raw_config, dict) else None
+        raw_groups = raw_config.get("group_umos") if raw_config else None
+        if raw_groups:
+            dropped = dropped_umo_values(raw_groups, "GroupMessage")
+            if dropped:
+                logger.warning(
+                    f"[VoiceHub] 以下群广播会话形状非法，已忽略：{dropped}。"
+                    "正确格式示例：aiocqhttp:GroupMessage:123456（请在群内发送 /vh status 取值）。"
+                )
 
         self.http_server = VoiceHubHttpServer(
             self.plugin_config,

@@ -8,7 +8,7 @@ from typing import Any, Optional
 import aiohttp
 
 from .config import VoiceHubConfig
-from .contract import BIND_PATH, UNBIND_PATH, TOKEN_HEADER
+from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, TOKEN_HEADER
 
 
 @dataclass
@@ -48,7 +48,9 @@ class VoiceHubClient:
 
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=payload, headers=headers) as response:
+                async with session.post(url, json=payload, headers=headers, allow_redirects=False) as response:
+                    if 300 <= response.status < 400:
+                        return BindResult(ok=False, message="VoiceHub 回调拒绝重定向")
                     body = await self._read_json(response)
                     if response.status >= 400:
                         return BindResult(ok=False, message=self._error_message(body, response.status))
@@ -105,3 +107,27 @@ class VoiceHubClient:
             解绑结果。
         """
         return await self._post(UNBIND_PATH, {"umo": umo})
+
+    async def verify_private_targets(self, umos: list[str]) -> bool:
+        """Only accept an authenticated, exact binding-store confirmation for every UMO."""
+        if not umos or not self.config.voicehub_base_url or not self.config.voicehub_token:
+            return False
+        timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{self.config.voicehub_base_url}{VERIFY_TARGETS_PATH}",
+                    json={"umos": umos},
+                    headers={TOKEN_HEADER: self.config.voicehub_token},
+                    allow_redirects=False,
+                ) as response:
+                    if response.status != 200:
+                        return False
+                    body = await self._read_json(response)
+                    verified = body.get("umos")
+                    return (body.get("success") is True and isinstance(verified, list)
+                            and len(verified) == len(umos) and len(set(umos)) == len(umos)
+                            and all(isinstance(item, str) for item in verified)
+                            and set(verified) == set(umos))
+        except Exception:  # noqa: BLE001 - network/timeout/invalid upstream response fails closed
+            return False

@@ -50,14 +50,14 @@ def plugin():
 class FakeEvent:
     def __init__(self, message="vh bind", group=""):
         self.message_str = message
-        self.unified_msg_origin = "bot:FriendMessage:user1"
+        self.unified_msg_origin = "aiocqhttp:FriendMessage:user1"
         self.group = group
 
     def get_group_id(self):
         return self.group
 
     def get_platform_name(self):
-        return "bot"
+        return "aiocqhttp"
 
     def plain_result(self, text):
         return text
@@ -83,9 +83,9 @@ def test_bind_passes_only_one_code(plugin):
             captured.append((code, umo, platform))
             return types.SimpleNamespace(ok=True, username="u")
         p.voicehub_client.verify_binding_code = verify
-        assert "绑定成功" in (await collect(p.vh_bind(FakeEvent("vh bind ABC"), "ABC")))[0]
-        assert captured == [("ABC", "bot:FriendMessage:user1", "bot")]
-        assert "用法" in (await collect(p.vh_bind(FakeEvent("vh bind ABC DEF"), "ABC DEF")))[0]
+        assert "绑定成功" in (await collect(p.vh_bind(FakeEvent("vh bind 0123456789abcdef01234567"), "0123456789abcdef01234567")))[0]
+        assert captured == [("0123456789abcdef01234567", "aiocqhttp:FriendMessage:user1", "aiocqhttp")]
+        assert "用法" in (await collect(p.vh_bind(FakeEvent("vh bind 0123456789abcdef01234567 DEADBEEF"), "0123456789abcdef01234567 DEADBEEF")))[0]
     asyncio.run(run())
 
 
@@ -95,7 +95,7 @@ async def collect(generator):
 
 @pytest.fixture
 def server(plugin):
-    config = plugin.VoiceHubConfig.from_mapping({"webhook_token": "secret", "listen_host": "127.0.0.1", "listen_port": 0, "allowed_ips": "127.0.0.1", "group_umos": "bot:GroupMessage:room"})
+    config = plugin.VoiceHubConfig.from_mapping({"webhook_token": "secret", "listen_host": "127.0.0.1", "listen_port": 0, "allowed_ips": "127.0.0.1", "group_umos": "aiocqhttp:GroupMessage:room"})
     class Sender:
         context = types.SimpleNamespace(platform_manager=types.SimpleNamespace(platform_insts=[]))
         def __init__(self):
@@ -106,7 +106,10 @@ def server(plugin):
             self.calls.append((targets, title, content, url))
             return types.SimpleNamespace(sent=len(targets), failed=[])
     sender = Sender()
-    return plugin.VoiceHubHttpServer(config, sender, None, logging.getLogger("test")), sender
+    class Verifier:
+        async def verify_private_targets(self, umos):
+            return umos == ["aiocqhttp:FriendMessage:user1"]
+    return plugin.VoiceHubHttpServer(config, sender, Verifier(), logging.getLogger("test")), sender
 
 
 def test_live_auth_and_spoofed_forwarded_header(server):
@@ -117,7 +120,7 @@ def test_live_auth_and_spoofed_forwarded_header(server):
         url = f"http://127.0.0.1:{port}/voicehub/push"
         try:
             async with aiohttp.ClientSession() as client:
-                body = {"content": "hello", "targets": {"umo": ["bot:FriendMessage:user1"]}}
+                body = {"content": "hello", "targets": {"umo": ["aiocqhttp:FriendMessage:user1"]}}
                 response = await client.post(url, json=body, headers={"X-Forwarded-For": "127.0.0.1"})
                 assert response.status == 401
                 service.config.allowed_ips = ["203.0.113.1"]
@@ -126,7 +129,7 @@ def test_live_auth_and_spoofed_forwarded_header(server):
                 service.config.allowed_ips = ["127.0.0.1"]
                 response = await client.post(url, json=body, headers={"X-VoiceHub-Token": "secret"})
                 assert response.status == 200
-                assert sender.calls[0][0] == ["bot:FriendMessage:user1"]
+                assert sender.calls[0][0] == ["aiocqhttp:FriendMessage:user1"]
         finally:
             await service.stop()
     asyncio.run(run())
@@ -147,18 +150,137 @@ def test_constant_time_token_compare(plugin, server, monkeypatch):
 
 @pytest.mark.parametrize("targets", [
     {"user_ids": ["1"]}, {"group": "false"}, {"group": 1}, {"umo": [42]},
-    {"umo": {"evil": "obj"}}, {"umo": ["bad"]}, {"umo": ["bot:GroupMessage:unapproved"]},
-    {"umo": ["bot:FriendMessage:"]}, {"umo": ["bot:OtherMessage:id"]},
-    {"umo": ["bot:FriendMessage:user"], "umos": ["bot:FriendMessage:other"]},
+    {"umo": {"evil": "obj"}}, {"umo": ["bad"]}, {"umo": ["aiocqhttp:GroupMessage:unapproved"]},
+    {"umo": ["aiocqhttp:FriendMessage:"]}, {"umo": ["aiocqhttp:OtherMessage:id"]},
+    {"umo": ["aiocqhttp:FriendMessage:user"], "umos": ["aiocqhttp:FriendMessage:other"]},
 ])
 def test_targets_reject_invalid_or_unapproved(plugin, server, targets):
     service, _ = server
     assert service._resolve_targets(targets)[1]
 
 
+@pytest.mark.parametrize("malformed", [
+    "myroom",                       # 缺少冒号：曾触发 IndexError -> HTTP 500
+    "aiocqhttp",                    # 只有一段
+    "aiocqhttp:Group",              # 只有两段
+    ":GroupMessage:room",           # 平台标识为空
+    "aiocqhttp:Bogus:room",         # 未知会话类型
+    "aiocqhttp:GroupMessage:",      # 会话 ID 为空
+    "aiocqhttp:GroupMessage:a b",   # 含空白
+    "x" * 600 + ":GroupMessage:r",  # 超长
+])
+def test_malformed_group_umos_are_dropped_at_load(plugin, malformed):
+    """畸形 group_umos 在加载时即被丢弃，绝不进入推送链路（曾导致未捕获 500）。"""
+    config = plugin.VoiceHubConfig.from_mapping({"group_umos": malformed})
+    assert config.group_umos == [], f"{malformed!r} 不应成为群广播目标"
+    assert plugin.dropped_umo_values(malformed, "GroupMessage") == [malformed]
+
+
+def test_valid_group_umo_is_kept_and_foreign_types_dropped(plugin):
+    config = plugin.VoiceHubConfig.from_mapping({
+        "group_umos": "aiocqhttp:GroupMessage:room, aiocqhttp:FriendMessage:user, plainroom",
+    })
+    assert config.group_umos == ["aiocqhttp:GroupMessage:room"]
+
+
+def test_initialize_warns_about_dropped_groups_but_still_starts(plugin):
+    """畸形 group_umos 不得阻止服务启动，且合法项仍然生效。"""
+    async def run():
+        instance = plugin.VoiceHubPlugin(types.SimpleNamespace(), {
+            "webhook_token": "secret", "listen_host": "127.0.0.1", "listen_port": 0,
+            "group_umos": "myroom, aiocqhttp:GroupMessage:room",
+        })
+        await instance.initialize()
+        try:
+            assert instance.http_server is not None
+            assert instance.plugin_config.group_umos == ["aiocqhttp:GroupMessage:room"]
+        finally:
+            await instance.terminate()
+    asyncio.run(run())
+
+
+def test_malformed_target_from_request_is_rejected_not_crashing(plugin):
+    """请求体里出现畸形 UMO 必须返回 400，而不是抛异常。"""
+    config = plugin.VoiceHubConfig.from_mapping({"webhook_token": "secret", "group_umos": "aiocqhttp:GroupMessage:room"})
+    sender = types.SimpleNamespace(group_targets=lambda: config.group_umos)
+    service = plugin.VoiceHubHttpServer(config, sender, None, logging.getLogger("test"))
+    for malformed in ["myroom", "aiocqhttp", "aiocqhttp:Group", "aiocqhttp:Bogus:room"]:
+        _, error = service._resolve_targets({"umo": [malformed]})
+        assert error, f"{malformed!r} 应被拒绝"
+
+
+def test_malformed_group_umo_does_not_500_on_live_push(plugin, server):
+    """回归：管理员把 group_umos 填成无冒号值时，群广播不得变成 500。"""
+    async def run():
+        service, sender = server
+        # 模拟配置被写坏后的运行时状态（绕过加载期过滤）。
+        service.config.group_umos = ["myroom"]
+        service.push_service.group_targets = lambda: ["myroom"]
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(
+                    f"http://127.0.0.1:{port}/voicehub/push",
+                    json={"content": "hello", "targets": {"group": True}},
+                    headers={"X-VoiceHub-Token": "secret"},
+                ) as response:
+                    assert response.status in (200, 400), f"不得为 500，实际 {response.status}"
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+
 def test_targets_accept_private_and_configured_group(server):
     service, _ = server
-    assert service._resolve_targets({"umo": ["bot:FriendMessage:user", "bot:FriendMessage:user"], "group": True}) == (["bot:GroupMessage:room", "bot:FriendMessage:user"], "")
+    assert service._resolve_targets({"umo": ["aiocqhttp:FriendMessage:user", "aiocqhttp:FriendMessage:user"], "group": True}) == (["aiocqhttp:GroupMessage:room", "aiocqhttp:FriendMessage:user"], "")
+
+def test_missing_targets_never_broadcasts(server):
+    service, _ = server
+    assert service._resolve_targets(None)[1]
+
+def test_explicit_group_only_still_sends_without_voicehub_lookup(server):
+    async def run():
+        service, sender = server
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"group": True}}, headers={"X-VoiceHub-Token": "secret"}) as response:
+                    assert response.status == 200
+            assert sender.calls == [(["aiocqhttp:GroupMessage:room"], "", "hello", None)]
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+def test_private_target_without_verifier_fails_closed(server):
+    async def run():
+        service, sender = server
+        service.voicehub_client = None
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"umo": "aiocqhttp:FriendMessage:user1"}}, headers={"X-VoiceHub-Token": "secret"}) as response:
+                    assert response.status == 403
+            assert sender.calls == []
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+def test_unverified_private_target_never_sends(server):
+    async def run():
+        service, sender = server
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"umo": ["aiocqhttp:FriendMessage:attacker"], "group": True}}, headers={"X-VoiceHub-Token": "secret"}) as response:
+                    assert response.status == 403
+            assert not sender.calls
+        finally:
+            await service.stop()
+    asyncio.run(run())
 
 def test_live_voicehub_payload_contract(server):
     async def run():
@@ -169,12 +291,12 @@ def test_live_voicehub_payload_contract(server):
             async with aiohttp.ClientSession() as client:
                 async with client.post(
                     f"http://127.0.0.1:{port}/voicehub/push",
-                    json={"title": "VoiceHub", "content": "通知", "targets": {"umo": ["bot:FriendMessage:user1"], "group": True}},
+                    json={"title": "VoiceHub", "content": "通知", "targets": {"umo": ["aiocqhttp:FriendMessage:user1"], "group": True}},
                     headers={"X-VoiceHub-Token": "secret"},
                 ) as response:
                     assert response.status == 200
                     assert (await response.json())["sent"] == 2
-            assert sender.calls[-1][0] == ["bot:GroupMessage:room", "bot:FriendMessage:user1"]
+            assert sender.calls[-1][0] == ["aiocqhttp:GroupMessage:room", "aiocqhttp:FriendMessage:user1"]
         finally:
             await service.stop()
     asyncio.run(run())

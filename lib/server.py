@@ -7,7 +7,7 @@ from typing import Any, List, Tuple
 
 from aiohttp import web
 
-from .config import VoiceHubConfig
+from .config import VoiceHubConfig, parse_umo, umo_message_type
 from .push import PushService
 from .voicehub import VoiceHubClient
 from .contract import PUSH_PATH, HEALTH_PATH, TOKEN_HEADER
@@ -118,6 +118,17 @@ class VoiceHubHttpServer:
         if not umos:
             return web.json_response({"success": False, "message": "没有可用的推送目标"}, status=400)
 
+        # 会话类型解析失败的目标直接判为非法，不得进入推送链路。
+        private_umos = [umo for umo in umos if umo_message_type(umo) == "FriendMessage"]
+        if private_umos:
+            try:
+                authorized = await self.voicehub_client.verify_private_targets(private_umos)
+            except Exception as exc:  # noqa: BLE001 - 回查故障时不得推送
+                self.logger.warning(f"[VoiceHub] 私聊目标回查失败: {exc}")
+                authorized = False
+            if not authorized:
+                return web.json_response({"success": False, "message": "私聊目标未获授权或无法验证"}, status=403)
+
         url = payload.get("url")
         result = await self.push_service.push_text(
             umos,
@@ -178,11 +189,7 @@ class VoiceHubHttpServer:
         umos: List[str] = []
 
         if raw is None:
-            # 未指定目标时退化为管理员配置的群广播会话
-            groups = list(dict.fromkeys(self.push_service.group_targets()))
-            if len(groups) > MAX_TARGETS:
-                return [], f"单次推送目标不能超过 {MAX_TARGETS} 个"
-            return groups, ""
+            return [], "必须明确指定 targets"
 
         if not isinstance(raw, dict):
             return [], "targets 必须是对象"
@@ -193,7 +200,11 @@ class VoiceHubHttpServer:
             return [], "group 必须是布尔值"
 
         if raw.get("group"):
-            umos.extend(self.push_service.group_targets())
+            # 只接受形状合法的 GroupMessage；配置被写坏时不得进入推送链路。
+            umos.extend(
+                target for target in self.push_service.group_targets()
+                if umo_message_type(target) == "GroupMessage"
+            )
 
         if "umo" in raw:
             value = raw["umo"]
@@ -206,8 +217,8 @@ class VoiceHubHttpServer:
                     return [], "umo 包含无效会话"
                 # Private sessions are selected from VoiceHub's binding store;
                 # group sessions must additionally be explicitly admin-approved.
-                pieces = item.split(":", 2)
-                if len(pieces) != 3 or not all(pieces) or any(c.isspace() for c in item):
+                pieces = parse_umo(item)
+                if pieces is None:
                     return [], "umo 包含无效会话"
                 if pieces[1] == "GroupMessage" and item not in self.push_service.group_targets():
                     return [], "群会话未被管理员授权"

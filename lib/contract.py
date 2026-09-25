@@ -7,6 +7,7 @@ HEALTH_PATH = "/voicehub/health"
 # 插件回查 VoiceHub 的路径
 BIND_PATH = "/api/bot/voicehub/bind"
 UNBIND_PATH = "/api/bot/voicehub/unbind"
+VERIFY_TARGETS_PATH = "/api/bot/voicehub/verify-targets"
 
 # 双方约定的请求头
 TOKEN_HEADER = "X-VoiceHub-Token"

@@ -11,7 +11,7 @@ VoiceHub 通过独立 HTTP 端口把通知交给常驻 AstrBot；插件使用 As
 - `public_base_url`：对外展示的 HTTPS 地址（不带 `/voicehub/push`）；与监听地址可不同。生产环境使用 TLS 反向代理，不要在公网明文传输 token。
 - `allowed_ips`：可选逗号分隔的 IP 地址；只匹配实际 TCP 对端。反向代理部署时填代理地址，并在代理处单独实施上游 IP 白名单；`X-Forwarded-For` 不被插件信任。
 - `voicehub_base_url`：VoiceHub 站点地址，绑定/解绑必须配置；`voicehub_token` 留空则复用 `webhook_token`。VoiceHub 必须支持下面的回调路径并验证同一密钥。
-- `group_umos`：管理员指定的群广播会话 UMO，逗号分隔；在对应群里执行 `/vh status` 取得。用户不能通过绑定指令选择群，绑定指令始终只允许私聊。
+- `group_umos`：管理员指定的群广播会话 UMO，逗号分隔；在对应群里执行 `/vh status` 取得。**必须是 `平台实例ID:GroupMessage:会话ID` 形式**（会话类型须为 `GroupMessage`）；形状不合法的条目会在启动时被忽略并在日志中列出。用户不能通过绑定指令选择群，绑定指令始终只允许私聊。
 
 **绑定码的生成、过期和一次性消费由 VoiceHub 实现**，插件不保存码或绑定状态。
 
@@ -19,12 +19,14 @@ VoiceHub 通过独立 HTTP 端口把通知交给常驻 AstrBot；插件使用 As
 
 所有请求均携带 `X-VoiceHub-Token: <webhook_token>`。仅接受 TCP 对端符合可选的 IP 白名单。请求体最大 64 KiB，一次最多 200 个目标。
 
-- `POST /voicehub/push`：`{"title":"标题","content":"正文","url":"https://...","targets":{"umo":["adapter:FriendMessage:session"]}}`。`content` 必填；`title`、`url` 可选。VoiceHub 从其绑定表取出用户私聊 UMO，不应允许终端用户指定任意 UMO。群广播使用 `{"targets":{"group":true}}`，只发送到插件管理员配置的 `group_umos`；也可把已配置的群 UMO 放在 `umo` 数组中。`targets` 缺失时默认群广播。无可用目标返回 400。响应为 `{"success":true,"sent":1,"failed":[]}`；每目标失败项含 `umo`、`reason`。若部分失败，`success` 表示至少一个成功，调用方须检查 `failed`。
+- `POST /voicehub/push`：`{"title":"标题","content":"正文","url":"https://...","targets":{"umo":["platform_id:FriendMessage:session"]}}`。这里的 `platform_id` 是 AstrBot 的平台**实例 ID**（配置里的 `id`，默认常为 `default`），不是适配器类型名；请用 `/vh status` 显示的整串 UMO。`content` 必填；`title`、`url` 可选。必须显式指定 `targets`；缺失时返回 400，**不会隐式群广播**。群广播使用 `{"targets":{"group":true}}`，只发送到插件管理员配置的 `group_umos`；也可把已配置的群 UMO 放在 `umo` 数组中。私聊目标在推送前须通过下述 VoiceHub 绑定回查；回查失败、未配置或不匹配时整批拒绝（403），不会发送其中的群目标。无可用目标返回 400。响应为 `{"success":true,"sent":1,"failed":[]}`；每目标失败项含 `umo`、`reason`。若部分失败，`success` 表示至少一个成功，调用方须检查 `failed`。
 - `GET /voicehub/health`：同样要求 token/IP 白名单；返回平台列表与群目标数。
 - 插件向 VoiceHub `POST /api/bot/voicehub/bind`：`{"code":"一次性绑定码","umo":"adapter:FriendMessage:session","platform":"adapter"}`。
 - 插件向 VoiceHub `POST /api/bot/voicehub/unbind`：`{"umo":"adapter:FriendMessage:session"}`。
+- 插件向 VoiceHub `POST /api/bot/voicehub/verify-targets`：`{"umos":["adapter:FriendMessage:session"]}`，携带 `X-VoiceHub-Token: <voicehub_token>`。VoiceHub **须验证令牌，并且只对当前有效的私聊绑定逐个核对**，全部有效时响应 HTTP 200 `{"success":true,"umos":["adapter:FriendMessage:session"]}`（列表与请求完全一致，顺序可不同）；任一目标未绑定应拒绝，不可仅凭 UMO 格式或调用方提交的列表回显为通过。插件要求严格的成功标志、完整精确列表和 200；回查不可用或重定向时拒绝发送。VoiceHub 必须实现此端点，旧版本没有端点时私聊推送将被拒绝。
 
 VoiceHub 回调应明确返回 `{"success":true,"username":"可选名称"}` 或 `{"success":false,"message":"原因"}`；缺失 `success:true` 的响应按失败处理。回调使用 `X-VoiceHub-Token: <voicehub_token>`（默认同推送令牌）。VoiceHub 应验证令牌、一次性码的有效期、私聊归属与重绑规则。插件只传递会话标识，不存储账户绑定关系。
+插件对绑定、解绑及目标回查请求均不跟随 HTTP 重定向，避免令牌转发至重定向目的地；请在 `voicehub_base_url` 填写无需跳转的最终地址。
 
 ## 聊天指令
 
@@ -43,4 +45,4 @@ uv pip install --python .venv/bin/python -r requirements.txt pytest
 .venv/bin/python -m pytest tests -q
 ```
 
-测试使用本机 aiohttp HTTP 服务与桩 AstrBot 事件，无需运行真实聊天平台。未覆盖 VoiceHub 端实现或真实适配器端到端送达。
+测试使用本机 aiohttp HTTP 服务与桩 AstrBot 事件，无需运行真实聊天平台：`tests/test_integration.py` 会同时启动桩 VoiceHub（实现 bind/unbind/verify-targets）与插件入站服务，覆盖令牌校验、绑定往返、已绑定/未绑定私聊目标、显式群广播、缺失 targets 拒绝、回查重定向拒绝与令牌不外泄。未覆盖 VoiceHub 端的数据库查询与真实适配器端到端送达。

@@ -24,12 +24,12 @@ def test_bind_rejects_group_by_default(plugin):
         async def forbidden(*args):
             raise AssertionError("group bind sent upstream")
         p.voicehub_client.verify_binding_code = forbidden
-        result = await collect(p.vh_bind(FakeEvent("vh bind ABC", group="room"), "ABC"))
+        result = await collect(p.vh_bind(FakeEvent("vh bind 0123456789abcdef01234567", group="room"), "0123456789abcdef01234567"))
         assert "私聊" in result[0]
     asyncio.run(run())
 
 
 def test_targets_reject_excess_count(server):
     service, _ = server
-    targets = [f"bot:FriendMessage:user{i}" for i in range(201)]
+    targets = [f"aiocqhttp:FriendMessage:user{i}" for i in range(201)]
     assert service._resolve_targets({"umo": targets})[1]
