@@ -58,7 +58,7 @@
     "description": "群广播会话（可选）",
     "type": "text",
     "default": "",
-    "hint": "逗号分隔的 unified_msg_origin，例如 aiocqhttp:GroupMessage:123456。VoiceHub 发起群广播时推送到这些会话；可在群里发送 /vh status 查看当前会话 ID。"
+    "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /vh status 取整串。形状不合法的条目会在启动时被忽略并记录日志。"
   },
 
   "request_timeout_seconds": {
