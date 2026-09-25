@@ -50,6 +50,27 @@ VoiceHub 常驻在服务器上，本插件作为它与聊天平台之间的**出
 
 因此 **VoiceHub 必须能访问插件的监听端口**，**插件必须能访问 VoiceHub 站点**，两个方向都要放行。
 
+### 两种推送方向
+
+上面的入站方式要求 VoiceHub 能访问插件。如果插件跑在内网 / NAT 之后（家宽、只出不进的容器网络、只开了出站白名单的服务器），VoiceHub 打不进来，改用**拉取模式**：
+
+```
+push 模式（默认）           pull 模式（pull_interval_seconds > 0）
+VoiceHub ──POST──▶ 插件     插件 ──POST /api/bot/voicehub/pull──▶ VoiceHub 取件
+                           插件 ──POST /api/bot/voicehub/ack───▶ VoiceHub 回执
+插件必须可达                 插件只需能出站访问 VoiceHub
+```
+
+拉取模式下：
+
+- 插件**不再开放入站端口**（`listen_host` / `listen_port` / `allowed_ips` 均不生效）；
+- 通知先入 VoiceHub 的待投递队列，插件每 `pull_interval_seconds` 秒取一批投递并回报结果；
+- 领取带租约，插件崩溃或重启后未回执的通知会被重新领取，不会丢；
+- 单条通知投递失败会回报 VoiceHub 重试，超过 3 次后标记失败停止重试；
+- **VoiceHub 后台的「推送方向」必须同时选 `pull`**，两边设置要一致，否则 VoiceHub 仍会尝试直连插件。
+
+`group_umos` 在两种模式下都由插件侧生效：拉取模式下广播条目会投递到插件配置的群目标。
+
 ## 快速开始
 
 ### 1. 安装插件
@@ -81,6 +102,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `include_url`：默认开启。关闭后只推送标题与正文，不带 VoiceHub 站点链接。
 - `voicehub_base_url`：VoiceHub 站点地址，例如 `https://voicehub.example.com`。**绑定/解绑/私聊回查都依赖它**；留空则绑定指令不可用（推送仍可用）。
 - `voicehub_token`：回查 VoiceHub 用的令牌，留空复用 `webhook_token`（一般无需单独填写）。
+- `pull_interval_seconds`：**拉取模式**开关，默认 `0`（关闭）。填大于 0 的值（建议 15–60）即启用，见下节。
 - `group_umos`：群广播目标，逗号或换行分隔，见下节。
 - `request_timeout_seconds`：回调 VoiceHub 的超时，默认 15 秒。
 
@@ -91,10 +113,11 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 管理员 → 站点设置 → `AstrBot 通知配置`：
 
 1. 勾选 **启用 AstrBot 通知**；
-2. `AstrBot 服务地址` 填插件的对外地址，例如 `https://astrbot.example.com:6199`；
-3. `访问令牌` 填与插件 `webhook_token` **完全相同**的值（页面不会回显已有密钥，留空表示保持不变）；
-4. 需要群广播时勾选 **启用广播通知**（只控制 VoiceHub 是否发起广播，接收的群在插件侧配置）；
-5. 保存。
+2. **推送方向**按部署方式选：VoiceHub 能访问插件用 `push`（默认）；插件在内网/NAT 后用 `pull`，并与插件侧 `pull_interval_seconds` 配合；
+3. `AstrBot 服务地址` 填插件的对外地址，例如 `https://astrbot.example.com:6199`（`pull` 模式下仅作展示，不参与投递）；
+4. `访问令牌` 填与插件 `webhook_token` **完全相同**的值（页面不会回显已有密钥，留空表示保持不变）；
+5. 需要群广播时勾选 **启用广播通知**（只控制 VoiceHub 是否发起广播，接收的群在插件侧配置）；
+6. 保存。
 
 用户侧在 `账号设置 → QQ 私聊通知（AstrBot）` 里生成一次性绑定码，然后在**机器人私聊**中发送 `/vh bind <绑定码>` 完成绑定。
 
@@ -170,6 +193,8 @@ default:GroupMessage:123456789
 - `POST /api/bot/voicehub/bind`：`{"code": "一次性绑定码", "umo": "...", "platform": "适配器名"}`
 - `POST /api/bot/voicehub/unbind`：`{"umo": "..."}`
 - `POST /api/bot/voicehub/verify-targets`：`{"umos": ["..."]}`。VoiceHub **必须验证令牌，并且只对当前有效的私聊绑定逐个核对**；全部有效时返回 HTTP 200 `{"success": true, "umos": [...]}`，列表需与请求完全一致（顺序可不同）。插件要求严格的成功标志、完整精确列表和 200，任一不符或不可用时整批拒绝。
+- `POST /api/bot/voicehub/pull`：拉取模式取件，`{}`。返回 `{"success": true, "items": [{"id": 1, "title": "...", "content": "...", "url": "...", "umos": ["..."], "broadcast": false}]}`；**每个目标都须在入队前已确认为有效绑定**，插件不在此处回查。
+- `POST /api/bot/voicehub/ack`：拉取模式回执，`{"results": [{"id": 1, "success": true}]}`；失败项可带 `reason`。VoiceHub 据此标记已投递或安排重试（超过尝试上限后停止）。
 
 VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"success": false, "message": "原因"}`；缺少 `success: true` 按失败处理。令牌校验、绑定码有效期、私聊归属与重绑规则都由 VoiceHub 负责。
 
@@ -191,7 +216,8 @@ VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"
 | VoiceHub 报 401 | 两侧令牌不一致，或反向代理把 `X-VoiceHub-Token` 过滤掉了。 |
 | VoiceHub 报 403「私聊目标未获授权」 | 用户未绑定、绑定已失效，或插件没配 `voicehub_base_url`，或回查超时/被重定向。 |
 | VoiceHub 报 400「群会话未被管理员授权」 | 该群不在 `group_umos` 中。 |
-| 群广播收不到 | 看启动日志的「形状非法，已忽略」告警；用 `/vh status` 重新取值。 |
+| 群广播收不到 | 看启动日志的「形状非法，已忽略」告警；用 `/vh status` 重新取值。拉取模式下还需确认 VoiceHub 后台推送方向已选 `pull`。 |
+| 拉取模式不工作 | 检查 `pull_interval_seconds` > 0、`voicehub_base_url` 与令牌齐全；`/vh status` 的服务行会显示「拉取模式（每 N 秒…）」。 |
 | 绑定失败「插件未配置 VoiceHub 站点地址」 | 填 `voicehub_base_url`。 |
 | 通知「发送成功」但没收到 | 适配器返回成功只说明 AstrBot 找到了对应平台实例，不保证第三方平台最终送达；用 `/vh test` 和 `/vh status` 先排除会话问题，再查平台侧限制。 |
 | 想确认插件在监听 | `curl -H "X-VoiceHub-Token: <token>" http://127.0.0.1:6199/voicehub/health`。 |
@@ -216,6 +242,7 @@ lib/config.py        配置解析、UMO 形状校验与过滤
 lib/contract.py      两侧共用的路径与请求头常量
 lib/server.py        入站 HTTP 服务（令牌/IP 校验、目标解析）
 lib/push.py          消息链构造与多目标推送
+lib/pull.py          拉取模式：主动取件、投递与回执
 lib/voicehub.py      回调 VoiceHub 的客户端（绑定/解绑/回查）
 _conf_schema.json    管理面板配置项定义
 tests/               桩 astrbot + 桩 VoiceHub 的测试套件

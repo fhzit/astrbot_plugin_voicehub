@@ -13,6 +13,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .lib.config import VoiceHubConfig, dropped_umo_values
+from .lib.pull import VoiceHubPullClient
 from .lib.push import PushService
 from .lib.server import VoiceHubHttpServer
 from .lib.voicehub import VoiceHubClient
@@ -34,12 +35,18 @@ class VoiceHubPlugin(Star):
         self.voicehub_client = VoiceHubClient(self.plugin_config)
         self.push_service = PushService(self.context, self.plugin_config, logger)
         self.http_server: Optional[VoiceHubHttpServer] = None
+        self.pull_client: Optional[VoiceHubPullClient] = None
 
     async def initialize(self):
-        """启动入站 HTTP 服务，接收 VoiceHub 的推送请求。"""
+        """启动通知通道。
+
+        拉取模式（pull_interval_seconds > 0）下插件主动向 VoiceHub 取件，
+        不需要 VoiceHub 能访问本机，因此不启动入站 HTTP 服务；否则保持原有
+        入站推送模式（要求 VoiceHub 可访问插件的监听端口）。
+        """
         if not self.plugin_config.webhook_token:
             logger.error(
-                "[VoiceHub] 未配置推送令牌（webhook_token），已跳过启动 HTTP 服务。"
+                "[VoiceHub] 未配置推送令牌（webhook_token），已跳过启动通知通道。"
                 "请在插件配置中填写与 VoiceHub 一致的令牌。"
             )
             return
@@ -53,8 +60,15 @@ class VoiceHubPlugin(Star):
             if dropped:
                 logger.warning(
                     f"[VoiceHub] 以下群广播会话形状非法，已忽略：{dropped}。"
-                    "正确格式示例：aiocqhttp:GroupMessage:123456（请在群内发送 /vh status 取值）。"
+                    "正确格式示例：default:GroupMessage:123456（请在群内发送 /vh status 取值）。"
                 )
+
+        if self.plugin_config.pull_interval_seconds > 0:
+            self.pull_client = VoiceHubPullClient(
+                self.plugin_config, self.push_service, logger
+            )
+            await self.pull_client.start()
+            return
 
         self.http_server = VoiceHubHttpServer(
             self.plugin_config,
@@ -69,7 +83,10 @@ class VoiceHubPlugin(Star):
             self.http_server = None
 
     async def terminate(self):
-        """插件卸载/停用时关闭 HTTP 服务。"""
+        """插件卸载/停用时关闭通知通道。"""
+        if self.pull_client:
+            await self.pull_client.stop()
+            self.pull_client = None
         if self.http_server:
             await self.http_server.stop()
             self.http_server = None
@@ -132,11 +149,12 @@ class VoiceHubPlugin(Star):
         """查看当前会话的推送状态与会话 ID。"""
         platform = event.get_platform_name()
         message_type = "群聊" if event.get_group_id() else "私聊"
-        endpoint = (
-            self.plugin_config.display_endpoint
-            if self.http_server
-            else "未启用（缺少推送令牌或启动失败）"
-        )
+        if self.pull_client:
+            endpoint = f"拉取模式（每 {self.plugin_config.pull_interval_seconds} 秒向 VoiceHub 取件）"
+        elif self.http_server:
+            endpoint = self.plugin_config.display_endpoint
+        else:
+            endpoint = "未启用（缺少推送令牌或启动失败）"
         yield event.plain_result(
             "VoiceHub 推送状态：\n"
             f"- 平台：{platform}\n"

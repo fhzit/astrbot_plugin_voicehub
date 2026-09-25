@@ -144,6 +144,8 @@ class VoiceHubConfig:
     request_timeout_seconds: int = DEFAULT_TIMEOUT
     voicehub_base_url: str = ""
     voicehub_token: str = ""
+    # 拉取模式的轮询间隔（秒）；0 表示不启用拉取（VoiceHub 可访问插件时用 push 即可）。
+    pull_interval_seconds: int = 0
 
     @classmethod
     def from_mapping(cls, raw: Optional[Mapping[str, Any]]) -> "VoiceHubConfig":
@@ -174,6 +176,7 @@ class VoiceHubConfig:
                 "request_timeout_seconds",
                 "voicehub_base_url",
                 "voicehub_token",
+                "pull_interval_seconds",
             ):
                 value = getattr(raw, "get", None)
                 if callable(value):
@@ -196,6 +199,7 @@ class VoiceHubConfig:
             request_timeout_seconds=_as_int(data.get("request_timeout_seconds"), DEFAULT_TIMEOUT),
             voicehub_base_url=str(data.get("voicehub_base_url") or "").strip().rstrip("/"),
             voicehub_token=voicehub_token,
+            pull_interval_seconds=max(0, _as_int(data.get("pull_interval_seconds"), 0)),
         )
 
     @property

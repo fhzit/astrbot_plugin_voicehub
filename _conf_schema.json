@@ -54,6 +54,12 @@
     "default": "",
     "hint": "留空时复用「推送令牌」。一般无需单独填写。"
   },
+  "pull_interval_seconds": {
+    "description": "拉取模式间隔（秒，0=关闭）",
+    "type": "int",
+    "default": 0,
+    "hint": "填大于 0 的值即启用拉取模式：由插件主动向 VoiceHub 取件投递，VoiceHub 无需能访问本机（插件在内网/NAT 后时使用）。此时 VoiceHub 后台的推送方向需选 pull。建议 15-60 秒。"
+  },
   "group_umos": {
     "description": "群广播会话（可选）",
     "type": "text",
