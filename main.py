@@ -1,0 +1,151 @@
+"""VoiceHub 推送插件：把 VoiceHub 的通知投递到 AstrBot 各平台适配器会话。
+
+插件定位是「出站网关」：不保存业务状态（用户与会话的绑定关系由 VoiceHub 维护），
+只负责校验令牌、解析目标会话、构造消息链、调用 AstrBot 适配器发送，
+并在指令中把绑定码回传给 VoiceHub 校验。
+"""
+
+from typing import Optional
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
+
+from .lib.config import VoiceHubConfig
+from .lib.push import PushService
+from .lib.server import VoiceHubHttpServer
+from .lib.voicehub import VoiceHubClient
+
+
+@register(
+    "astrbot_plugin_voicehub",
+    "fhzit",
+    "接收 VoiceHub 通知并推送到聊天平台会话",
+    "1.0.0",
+)
+class VoiceHubPlugin(Star):
+    """VoiceHub 推送插件。"""
+
+    def __init__(self, context: Context, config=None):
+        super().__init__(context)
+        self.raw_config = config
+        self.plugin_config = VoiceHubConfig.from_mapping(config)
+        self.voicehub_client = VoiceHubClient(self.plugin_config)
+        self.push_service = PushService(self.context, self.plugin_config, logger)
+        self.http_server: Optional[VoiceHubHttpServer] = None
+
+    async def initialize(self):
+        """启动入站 HTTP 服务，接收 VoiceHub 的推送请求。"""
+        if not self.plugin_config.webhook_token:
+            logger.error(
+                "[VoiceHub] 未配置推送令牌（webhook_token），已跳过启动 HTTP 服务。"
+                "请在插件配置中填写与 VoiceHub 一致的令牌。"
+            )
+            return
+
+        self.http_server = VoiceHubHttpServer(
+            self.plugin_config,
+            self.push_service,
+            self.voicehub_client,
+            logger,
+        )
+        try:
+            await self.http_server.start()
+        except Exception as exc:  # noqa: BLE001 - 端口占用等启动失败不得影响 AstrBot 主流程
+            logger.error(f"[VoiceHub] HTTP 服务启动失败: {exc}")
+            self.http_server = None
+
+    async def terminate(self):
+        """插件卸载/停用时关闭 HTTP 服务。"""
+        if self.http_server:
+            await self.http_server.stop()
+            self.http_server = None
+
+    # ------------------------------------------------------------------
+    # 指令
+    # ------------------------------------------------------------------
+
+    @filter.command_group("vh")
+    def vh(self):
+        """VoiceHub 推送相关指令组。"""
+
+    @vh.command("bind")
+    async def vh_bind(self, event: AstrMessageEvent, code: GreedyStr):
+        """绑定 VoiceHub 账号：/vh bind <绑定码>"""
+        if not self.plugin_config.webhook_token:
+            yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
+            return
+
+        if event.get_group_id():
+            yield event.plain_result(
+                "为避免个人通知被推送到群里，请在机器人私聊中发送绑定码。"
+            )
+            return
+
+        # AstrBot's CommandFilter strips the wake prefix before matching; use
+        # the parsed parameter instead of guessing from the raw message text.
+        code = code.strip()
+        if not code or len(code.split()) != 1:
+            yield event.plain_result(
+                "用法：/vh bind <绑定码>。绑定码请在 VoiceHub 的「机器人推送」中生成。"
+            )
+            return
+
+        result = await self.voicehub_client.verify_binding_code(
+            code, event.unified_msg_origin, event.get_platform_name()
+        )
+        if result.ok:
+            yield event.plain_result(
+                f"绑定成功，VoiceHub 通知将推送到当前会话（{result.username or '已绑定账号'}）。"
+            )
+        else:
+            yield event.plain_result(f"绑定失败：{result.message}")
+
+    @vh.command("unbind")
+    async def vh_unbind(self, event: AstrMessageEvent):
+        """解绑当前会话：/vh unbind"""
+        if not self.plugin_config.webhook_token:
+            yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
+            return
+
+        result = await self.voicehub_client.unbind(event.unified_msg_origin)
+        if result.ok:
+            yield event.plain_result("已解绑 VoiceHub 通知推送。")
+        else:
+            yield event.plain_result(f"解绑失败：{result.message}")
+
+    @vh.command("status")
+    async def vh_status(self, event: AstrMessageEvent):
+        """查看当前会话的推送状态与会话 ID。"""
+        platform = event.get_platform_name()
+        message_type = "群聊" if event.get_group_id() else "私聊"
+        endpoint = (
+            self.plugin_config.display_endpoint
+            if self.http_server
+            else "未启用（缺少推送令牌或启动失败）"
+        )
+        yield event.plain_result(
+            "VoiceHub 推送状态：\n"
+            f"- 平台：{platform}\n"
+            f"- 类型：{message_type}\n"
+            f"- 会话 ID：{event.unified_msg_origin}\n"
+            f"- 服务：{endpoint}"
+        )
+
+    @vh.command("test")
+    async def vh_test(self, event: AstrMessageEvent):
+        """向当前会话发送一条测试通知。"""
+        result = await self.push_service.push_text(
+            [event.unified_msg_origin],
+            "VoiceHub 测试通知",
+            "这是一条来自 VoiceHub 插件的测试推送。",
+            None,
+        )
+        if result.failed:
+            logger.warning(f"[VoiceHub] 测试推送存在失败目标: {result.failed}")
+        yield event.plain_result(
+            f"测试推送完成：成功 {result.sent} 个会话，失败 {len(result.failed)} 个。"
+        )
+
+

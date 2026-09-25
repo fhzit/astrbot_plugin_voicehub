@@ -1,0 +1,69 @@
+{
+  "webhook_token": {
+    "description": "推送令牌（必填）",
+    "type": "string",
+    "default": "",
+    "hint": "VoiceHub 后台「机器人推送」配置里填写的令牌，双方必须完全一致。留空时插件拒绝启动 HTTP 服务，避免无鉴权暴露接口。"
+  },
+  "listen_host": {
+    "description": "监听地址",
+    "type": "string",
+    "default": "0.0.0.0",
+    "hint": "默认 0.0.0.0。只允许本机访问时填 127.0.0.1。"
+  },
+  "listen_port": {
+    "description": "监听端口",
+    "type": "int",
+    "default": 6199,
+    "hint": "VoiceHub 需要能访问该端口，注意在防火墙/反向代理中放行。"
+  },
+  "public_base_url": {
+    "description": "对外访问地址（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "插件展示用，例如 https://astrbot.example.com:6199。留空时按监听地址拼接。"
+  },
+  "allowed_ips": {
+    "description": "IP 白名单（可选）",
+    "type": "text",
+    "default": "",
+    "hint": "逗号分隔。留空表示不限制来源 IP；配置后仅允许这些 IP 调用推送接口。"
+  },
+  "message_prefix": {
+    "description": "消息前缀（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "推送到聊天平台时在标题前加的前缀，例如「校园广播站」。留空则不加。"
+  },
+  "include_url": {
+    "description": "推送时附带来源链接",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后仅推送标题与正文，不附带 VoiceHub 站点链接。"
+  },
+
+  "voicehub_base_url": {
+    "description": "VoiceHub 站点地址",
+    "type": "string",
+    "default": "",
+    "hint": "例如 https://voicehub.example.com。用于处理绑定/解绑指令时回查 VoiceHub；留空则绑定指令不可用（推送仍可用）。"
+  },
+  "voicehub_token": {
+    "description": "回查 VoiceHub 的令牌（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "留空时复用「推送令牌」。一般无需单独填写。"
+  },
+  "group_umos": {
+    "description": "群广播会话（可选）",
+    "type": "text",
+    "default": "",
+    "hint": "逗号分隔的 unified_msg_origin，例如 aiocqhttp:GroupMessage:123456。VoiceHub 发起群广播时推送到这些会话；可在群里发送 /vh status 查看当前会话 ID。"
+  },
+
+  "request_timeout_seconds": {
+    "description": "回调 VoiceHub 超时(秒)",
+    "type": "int",
+    "default": 15
+  }
+}
