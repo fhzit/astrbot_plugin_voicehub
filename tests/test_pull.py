@@ -10,15 +10,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from astrbot_plugin_voicehub.lib.config import VoiceHubConfig
 from astrbot_plugin_voicehub.lib.pull import VoiceHubPullClient, parse_pull_items
+from astrbot_plugin_voicehub.lib.voicehub import VoiceHubClient
 
 
 class _StubVoiceHub:
     """桩 VoiceHub：记录收到的取件与回执请求，按预设返回条目。"""
 
-    def __init__(self, items):
+    def __init__(self, items, allowed_groups=None):
         self.items = items
         self.pulls = 0
         self.acks = []
+        self.verify_requests = []
+        # 群目标授权白名单：回查到不在其中的会话即拒绝。
+        self.allowed_groups = set(allowed_groups or [])
         self.headers = []
         self.redirect = False
         self.status = 200
@@ -57,6 +61,22 @@ class _StubVoiceHub:
                     outer.acks.append(json.loads(body or b"{}"))
                     payload = b'{"success":true,"updated":1}'
                     self.send_response(200)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                if self.path.endswith("/verify-targets"):
+                    # 群目标授权回查：只放行 outer.allowed_groups 中的会话。
+                    outer.verify_requests.append(json.loads(body or b"{}"))
+                    requested = json.loads(body or b"{}").get("umos") or []
+                    allowed = [umo for umo in requested if umo in outer.allowed_groups]
+                    if len(allowed) == len(requested):
+                        payload = json.dumps({"success": True, "umos": requested}).encode()
+                        self.send_response(200)
+                    else:
+                        payload = json.dumps({"success": False, "message": "包含未授权的目标"}).encode()
+                        self.send_response(403)
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(payload)))
                     self.end_headers()
@@ -164,16 +184,74 @@ def test_pull_cycle_delivers_and_acks():
 
 def test_broadcast_item_uses_configured_groups_and_dedupes():
     """广播条目投递到管理员配置的群目标，并与条目自带目标去重。"""
+    groups = ["default:GroupMessage:900", "default:GroupMessage:901"]
     stub = _StubVoiceHub([
         {"id": 21, "content": "全站广播", "umos": ["default:GroupMessage:900"], "broadcast": True},
-    ]).start()
+    ], allowed_groups=groups).start()
     try:
-        recorder = _PushRecorder(groups=["default:GroupMessage:900", "default:GroupMessage:901"])
-        client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
+        recorder = _PushRecorder(groups=groups)
+        config = _config(f"http://127.0.0.1:{stub.port}")
+        client = VoiceHubPullClient(config, recorder, _NullLogger(), VoiceHubClient(config))
         asyncio.run(client.run_once())
 
         assert recorder.calls[0]["umos"] == ["default:GroupMessage:900", "default:GroupMessage:901"]
         assert stub.acks == [{"results": [{"id": 21, "success": True}]}]
+        # 群目标投递前必须回查 VoiceHub 授权，而不是只信本地列表。
+        assert stub.verify_requests == [{"umos": groups}]
+    finally:
+        stub.stop()
+
+
+def test_broadcast_to_unauthorized_group_is_reported_failed():
+    """VoiceHub 撤销授权的群不得投递：回查不通过时按失败回报。"""
+    stub = _StubVoiceHub([
+        {"id": 22, "content": "全站广播", "umos": ["default:GroupMessage:900"], "broadcast": True},
+    ], allowed_groups=[]).start()
+    try:
+        recorder = _PushRecorder(groups=["default:GroupMessage:900"])
+        config = _config(f"http://127.0.0.1:{stub.port}")
+        client = VoiceHubPullClient(config, recorder, _NullLogger(), VoiceHubClient(config))
+        asyncio.run(client.run_once())
+
+        assert recorder.calls == []
+        ack = stub.acks[0]["results"][0]
+        assert ack["id"] == 22 and ack["success"] is False
+        assert "未获授权" in ack["reason"]
+    finally:
+        stub.stop()
+
+
+def test_broadcast_to_group_outside_local_allowlist_is_reported_failed():
+    """本机 group_umos 非空时，其中的群之外一律不投递（第二道闸门）。"""
+    stub = _StubVoiceHub([
+        {"id": 24, "content": "全站广播", "umos": ["default:GroupMessage:900"], "broadcast": True},
+    ], allowed_groups=["default:GroupMessage:900"]).start()
+    try:
+        # 本机白名单只写了另一个群：即使 VoiceHub 已授权，也不得投递。
+        recorder = _PushRecorder(groups=["default:GroupMessage:777"])
+        config = _config(f"http://127.0.0.1:{stub.port}")
+        client = VoiceHubPullClient(config, recorder, _NullLogger(), VoiceHubClient(config))
+        asyncio.run(client.run_once())
+
+        assert recorder.calls == []
+        ack = stub.acks[0]["results"][0]
+        assert ack["id"] == 24 and ack["success"] is False
+    finally:
+        stub.stop()
+
+
+def test_broadcast_without_voicehub_client_fails_closed():
+    """未注入 VoiceHub 客户端时群投递一律拒绝，宁可不发也不越权。"""
+    stub = _StubVoiceHub([
+        {"id": 23, "content": "全站广播", "umos": ["default:GroupMessage:900"], "broadcast": True},
+    ]).start()
+    try:
+        recorder = _PushRecorder(groups=["default:GroupMessage:900"])
+        client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
+        asyncio.run(client.run_once())
+
+        assert recorder.calls == []
+        assert stub.acks[0]["results"][0]["success"] is False
     finally:
         stub.stop()
 

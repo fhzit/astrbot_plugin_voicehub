@@ -118,7 +118,8 @@ class VoiceHubHttpServer:
         if not umos:
             return web.json_response({"success": False, "message": "没有可用的推送目标"}, status=400)
 
-        # 会话类型解析失败的目标直接判为非法，不得进入推送链路。
+        # 私聊目标以绑定表为准，群目标以 VoiceHub 后台白名单为准；两类都必须
+        # 拿到 VoiceHub 的正面确认，回查故障时一律不推送（fail closed）。
         private_umos = [umo for umo in umos if umo_message_type(umo) == "FriendMessage"]
         if private_umos:
             try:
@@ -129,6 +130,24 @@ class VoiceHubHttpServer:
             if not authorized:
                 return web.json_response({"success": False, "message": "私聊目标未获授权或无法验证"}, status=403)
 
+        group_umos = [umo for umo in umos if umo_message_type(umo) == "GroupMessage"]
+        if group_umos:
+            # 第二道闸门：本机 group_umos 非空时只放行其中的群，且当作授权失败
+            # 处理（而非参数错误），与 VoiceHub 的拒绝语义保持一致。
+            local_groups = self.push_service.group_targets()
+            if local_groups and any(umo not in local_groups for umo in group_umos):
+                self.logger.warning("[VoiceHub] 群目标不在本机附加白名单内，已拒绝")
+                return web.json_response(
+                    {"success": False, "message": "群目标未获授权或无法验证"}, status=403
+                )
+            try:
+                authorized = await self.voicehub_client.verify_group_targets(group_umos)
+            except Exception as exc:  # noqa: BLE001 - 回查故障时不得推送
+                self.logger.warning(f"[VoiceHub] 群目标回查失败: {exc}")
+                authorized = False
+            if not authorized:
+                return web.json_response({"success": False, "message": "群目标未获授权或无法验证"}, status=403)
+
         url = payload.get("url")
         result = await self.push_service.push_text(
             umos,
@@ -136,7 +155,6 @@ class VoiceHubHttpServer:
             content,
             str(url).strip() if isinstance(url, str) and url.strip() else None,
         )
-
         self.logger.info(
             f"[VoiceHub] 推送完成：成功 {result.sent}，失败 {len(result.failed)}"
         )
@@ -200,7 +218,8 @@ class VoiceHubHttpServer:
             return [], "group 必须是布尔值"
 
         if raw.get("group"):
-            # 只接受形状合法的 GroupMessage；配置被写坏时不得进入推送链路。
+            # 兼容路径：展开本地配置的群列表。群目标的授权判定以 VoiceHub 后台
+            # 白名单为准（见 handle_push 的回查），这里只是把已知的群会话补进目标。
             umos.extend(
                 target for target in self.push_service.group_targets()
                 if umo_message_type(target) == "GroupMessage"
@@ -215,13 +234,12 @@ class VoiceHubHttpServer:
             for item in value:
                 if not isinstance(item, str) or item != item.strip() or not item:
                     return [], "umo 包含无效会话"
-                # Private sessions are selected from VoiceHub's binding store;
-                # group sessions must additionally be explicitly admin-approved.
+                # 私聊目标由 VoiceHub 的绑定表确认；群目标由 VoiceHub 后台白名单确认
+                # （两步都在 handle_push 中回查）。本地群列表是可选的附加限制，
+                # 作为第二道闸门在 handle_push 的授权阶段校验。
                 pieces = parse_umo(item)
                 if pieces is None:
                     return [], "umo 包含无效会话"
-                if pieces[1] == "GroupMessage" and item not in self.push_service.group_targets():
-                    return [], "群会话未被管理员授权"
                 if pieces[1] not in {"FriendMessage", "GroupMessage"}:
                     return [], "不支持的会话类型"
                 umos.append(item)

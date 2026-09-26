@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .config import VoiceHubConfig, parse_umo
+from .config import VoiceHubConfig, parse_umo, umo_message_type
 from .contract import ACK_PATH, PULL_PATH, TOKEN_HEADER
 from .push import PushResult
 
@@ -87,10 +87,12 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
 class VoiceHubPullClient:
     """轮询 VoiceHub 待投递队列的后台任务。"""
 
-    def __init__(self, config: VoiceHubConfig, push_service: Any, logger: Any):
+    def __init__(self, config: VoiceHubConfig, push_service: Any, logger: Any, voicehub_client: Any = None):
         self.config = config
         self.push_service = push_service
         self.logger = logger
+        # 群目标授权由 VoiceHub 判定；未注入客户端时群投递会被拒绝（fail closed）。
+        self.voicehub_client = voicehub_client
         self._task: Optional[asyncio.Task] = None
 
     @property
@@ -194,6 +196,26 @@ class VoiceHubPullClient:
                     deduped.append(umo)
             if not deduped:
                 return {"id": item.id, "success": False, "reason": "没有可用的群广播目标"}
+
+            # 群目标必须由 VoiceHub 白名单确认后再投递：拉取模式下 VoiceHub 虽已按
+            # 白名单过滤过，但队列条目可能是在授权被撤销前入队的，因此这里再回查一次，
+            # 回查不通过就按失败回报，避免向已撤销授权的群发消息。
+            group_targets = [umo for umo in deduped if umo_message_type(umo) == "GroupMessage"]
+            if group_targets:
+                # 第二道闸门：本机 group_umos 非空时只放行其中的群。
+                local_groups = set(self.push_service.group_targets())
+                if local_groups and any(umo not in local_groups for umo in group_targets):
+                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
+                if self.voicehub_client is None:
+                    # 未注入客户端时无从确认授权，宁可不发也不越权。
+                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
+                try:
+                    authorized = await self.voicehub_client.verify_group_targets(group_targets)
+                except Exception as exc:  # noqa: BLE001 - 回查故障时不得投递
+                    self.logger.warning(f"[VoiceHub] 群目标回查失败: {exc}")
+                    authorized = False
+                if not authorized:
+                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
 
             outcome: PushResult = await self.push_service.push_text(
                 deduped, item.title, item.content, item.url

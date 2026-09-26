@@ -59,9 +59,10 @@ class StubVoiceHub:
         if self.redirect_verify:
             raise web.HTTPTemporaryRedirect(location="/stolen")
         umos = body.get("umos") or []
-        if umos and all(umo in self.bound for umo in umos):
+        # 群目标的作者是 VoiceHub 后台白名单：桩里只授权 GROUP_UMO。
+        if umos and all(umo in self.bound or umo == GROUP_UMO for umo in umos):
             return web.json_response({"success": True, "umos": umos})
-        return web.json_response({"success": False, "message": "包含未绑定的私聊目标"}, status=403)
+        return web.json_response({"success": False, "message": "包含未授权的目标"}, status=403)
 
     async def stolen(self, request):
         self.leaked.append(request.headers.get("X-VoiceHub-Token"))
@@ -148,7 +149,8 @@ def test_unbound_private_target_rejects_whole_batch_including_group():
     asyncio.run(run())
 
 
-def test_explicit_group_push_needs_no_binding_lookup():
+def test_explicit_group_push_is_authorized_through_voicehub():
+    """群推送不再依赖绑定表，但必须经 VoiceHub 白名单确认。"""
     async def run():
         async with stack() as (stub, sender, _client, url):
             async with aiohttp.ClientSession() as session:
@@ -157,7 +159,23 @@ def test_explicit_group_push_needs_no_binding_lookup():
                 }, headers={"X-VoiceHub-Token": TOKEN}) as response:
                     assert response.status == 200
             assert sender.calls == [([GROUP_UMO], "", "全校通知", None)]
-            assert stub.requests == []
+            assert stub.requests == [("verify", {"umos": [GROUP_UMO]})]
+
+    asyncio.run(run())
+
+
+def test_unauthorized_group_push_is_rejected():
+    """VoiceHub 未授权的群目标必须 403，且不投递、不泄露令牌。"""
+    async def run():
+        async with stack() as (stub, sender, _client, url):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json={
+                    "content": "全校通知",
+                    "targets": {"umo": "aiocqhttp:GroupMessage:not-allowed"},
+                }, headers={"X-VoiceHub-Token": TOKEN}) as response:
+                    assert response.status == 403
+            assert sender.calls == []
+            assert stub.leaked == []
 
     asyncio.run(run())
 

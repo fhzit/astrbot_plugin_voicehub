@@ -61,10 +61,16 @@
     "hint": "填大于 0 的值即启用拉取模式：由插件主动向 VoiceHub 取件投递，VoiceHub 无需能访问本机（插件在内网/NAT 后时使用）。此时 VoiceHub 后台的推送方向需选 pull。建议 15-60 秒。"
   },
   "group_umos": {
-    "description": "群广播会话（可选）",
+    "description": "本机附加群白名单（可选）",
     "type": "text",
     "default": "",
-    "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /广播 状态 取整串。形状不合法的条目会在启动时被忽略并记录日志。"
+    "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /广播 状态 取整串。群目标的正式白名单在 VoiceHub 后台配置（含平台归属），这里留空即可；填写后仅作为第二道闸门，只允许其中的群被推送。形状不合法的条目会在启动时被忽略并记录日志。"
+  },
+  "verify_cache_seconds": {
+    "description": "目标授权回查缓存（秒）",
+    "type": "int",
+    "default": 30,
+    "hint": "插件投递前会向 VoiceHub 回查目标是否获授权，回查结果缓存此时长以减少请求量。填 0 表示每次都回查。授权被撤销后最多延迟该时长生效。"
   },
 
   "request_timeout_seconds": {

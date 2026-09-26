@@ -141,6 +141,10 @@ class VoiceHubConfig:
 
     group_umos: List[str] = field(default_factory=list)
 
+    # 目标授权回查结果的缓存秒数（0=每次回查）。仅用于削峰，
+    # 授权判定的唯一来源始终是 VoiceHub。
+    verify_cache_seconds: int = 30
+
     request_timeout_seconds: int = DEFAULT_TIMEOUT
     voicehub_base_url: str = ""
     voicehub_token: str = ""
@@ -176,6 +180,7 @@ class VoiceHubConfig:
                 "include_url",
 
                 "group_umos",
+                "verify_cache_seconds",
 
                 "request_timeout_seconds",
                 "voicehub_base_url",
@@ -201,6 +206,7 @@ class VoiceHubConfig:
             include_url=_as_bool(data.get("include_url"), True),
 
             group_umos=_as_umo_list(data.get("group_umos"), "GroupMessage"),
+            verify_cache_seconds=max(0, _as_int(data.get("verify_cache_seconds"), 30)),
 
             request_timeout_seconds=_as_int(data.get("request_timeout_seconds"), DEFAULT_TIMEOUT),
             voicehub_base_url=str(data.get("voicehub_base_url") or "").strip().rstrip("/"),

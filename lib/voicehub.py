@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import aiohttp
 
-from .config import VoiceHubConfig
+from .config import VoiceHubConfig, umo_message_type
 from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, WEEKLY_SCHEDULE_PATH, TOKEN_HEADER
 
 
@@ -25,6 +26,8 @@ class VoiceHubClient:
 
     def __init__(self, config: VoiceHubConfig):
         self.config = config
+        # 目标授权回查的短期缓存：键为目标集合，值为 (过期时刻, 是否授权)。
+        self._verify_cache: dict = {}
 
     async def _post(self, path: str, payload: dict) -> BindResult:
         """向 VoiceHub 发起一次带令牌的 POST。
@@ -110,9 +113,30 @@ class VoiceHubClient:
 
     async def verify_private_targets(self, umos: list[str]) -> bool:
         """Only accept an authenticated, exact binding-store confirmation for every UMO."""
+        return await self._verify_targets(umos, expected={"FriendMessage"})
+
+    async def verify_group_targets(self, umos: list[str]) -> bool:
+        """确认群目标均在 VoiceHub 后台白名单内。
+
+        群目标无法由插件自行判定：会话串前缀是 AstrBot 平台实例 ID，插件本地
+        列表无法证明该群属于哪一平台，也无法感知管理员在后台撤销授权的动作。
+        因此授权判定完全交给 VoiceHub，插件只做「问一次、答不上就不发」的
+        失败即关闭（fail closed）处理。
+        """
+        return await self._verify_targets(umos, expected={"GroupMessage"})
+
+    async def _verify_targets(self, umos: list[str], expected: set) -> bool:
+        """向 VoiceHub 回查目标授权，并要求返回集合与本批目标完全一致。"""
         if not umos or not self.config.voicehub_base_url or not self.config.voicehub_token:
             return False
+        if self.config.verify_cache_seconds > 0:
+            # 同一批目标在短时间内可能被 push 与 pull 两条路径分别确认，
+            # 缓存只用于削峰；缓存项都带短 TTL，因此撤销授权最多延迟一个 TTL。
+            cached = self._verify_cache.get(self._cache_key(umos))
+            if cached is not None and cached[0] > time.monotonic():
+                return cached[1]
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
+        verified_ok = False
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -121,16 +145,23 @@ class VoiceHubClient:
                     headers={TOKEN_HEADER: self.config.voicehub_token},
                     allow_redirects=False,
                 ) as response:
-                    if response.status != 200:
-                        return False
-                    body = await self._read_json(response)
-                    verified = body.get("umos")
-                    return (body.get("success") is True and isinstance(verified, list)
-                            and len(verified) == len(umos) and len(set(umos)) == len(umos)
-                            and all(isinstance(item, str) for item in verified)
-                            and set(verified) == set(umos))
+                    if response.status == 200:
+                        body = await self._read_json(response)
+                        verified = body.get("umos")
+                        verified_ok = (body.get("success") is True and isinstance(verified, list)
+                                       and len(verified) == len(umos) and len(set(umos)) == len(umos)
+                                       and all(isinstance(item, str) and umo_message_type(item) in expected
+                                               for item in verified)
+                                       and set(verified) == set(umos))
         except Exception:  # noqa: BLE001 - network/timeout/invalid upstream response fails closed
-            return False
+            verified_ok = False
+        if self.config.verify_cache_seconds > 0:
+            self._verify_cache[self._cache_key(umos)] = (time.monotonic() + self.config.verify_cache_seconds, verified_ok)
+        return verified_ok
+
+    def _cache_key(self, umos: list[str]) -> tuple:
+        """缓存键：排序后的目标集合，保证同一批目标顺序不同也命中同一条。"""
+        return tuple(sorted(umos))
 
     async def get_weekly_schedule(self) -> dict:
         """拉取本周排期数据。

@@ -109,6 +109,9 @@ def server(plugin):
     class Verifier:
         async def verify_private_targets(self, umos):
             return umos == ["aiocqhttp:FriendMessage:user1"]
+        async def verify_group_targets(self, umos):
+            # 群授权由 VoiceHub 判定：桩里只放行配置中的那个群。
+            return umos == ["aiocqhttp:GroupMessage:room"]
     return plugin.VoiceHubHttpServer(config, sender, Verifier(), logging.getLogger("test")), sender
 
 
@@ -150,11 +153,16 @@ def test_constant_time_token_compare(plugin, server, monkeypatch):
 
 @pytest.mark.parametrize("targets", [
     {"user_ids": ["1"]}, {"group": "false"}, {"group": 1}, {"umo": [42]},
-    {"umo": {"evil": "obj"}}, {"umo": ["bad"]}, {"umo": ["aiocqhttp:GroupMessage:unapproved"]},
+    {"umo": {"evil": "obj"}}, {"umo": ["bad"]},
     {"umo": ["aiocqhttp:FriendMessage:"]}, {"umo": ["aiocqhttp:OtherMessage:id"]},
     {"umo": ["aiocqhttp:FriendMessage:user"], "umos": ["aiocqhttp:FriendMessage:other"]},
 ])
 def test_targets_reject_invalid_or_unapproved(plugin, server, targets):
+    """形态/字段非法的 targets 属于参数错误：参数校验阶段即拒绝。
+
+    不在本机 group_umos 里的群属于「未授权」，走授权阶段的 403，
+    由 test_group_target_outside_local_allowlist_is_forbidden 覆盖。
+    """
     service, _ = server
     assert service._resolve_targets(targets)[1]
 
@@ -239,7 +247,8 @@ def test_missing_targets_never_broadcasts(server):
     service, _ = server
     assert service._resolve_targets(None)[1]
 
-def test_explicit_group_only_still_sends_without_voicehub_lookup(server):
+def test_explicit_group_only_sends_after_voicehub_authorization(server):
+    """群推送必须先由 VoiceHub 确认授权，确认通过后正常投递。"""
     async def run():
         service, sender = server
         await service.start()
@@ -249,6 +258,61 @@ def test_explicit_group_only_still_sends_without_voicehub_lookup(server):
                 async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"group": True}}, headers={"X-VoiceHub-Token": "secret"}) as response:
                     assert response.status == 200
             assert sender.calls == [(["aiocqhttp:GroupMessage:room"], "", "hello", None)]
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+
+def test_group_target_rejected_when_voicehub_does_not_authorize(server):
+    """VoiceHub 未授权的群目标必须 403，且一条消息都不发。"""
+    async def run():
+        service, sender = server
+        service.push_service.group_targets = lambda: ["aiocqhttp:GroupMessage:other"]
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"group": True}}, headers={"X-VoiceHub-Token": "secret"}) as response:
+                    assert response.status == 403
+            assert sender.calls == []
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+
+def test_group_target_outside_local_allowlist_is_forbidden(server):
+    """本机 group_umos 非空时，不在其中的群目标按授权失败拒绝（403，不是 400）。"""
+    async def run():
+        service, sender = server
+        service.push_service.group_targets = lambda: ["aiocqhttp:GroupMessage:room"]
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(
+                    f"http://127.0.0.1:{port}/voicehub/push",
+                    json={"content": "hello", "targets": {"umo": "aiocqhttp:GroupMessage:elsewhere"}},
+                    headers={"X-VoiceHub-Token": "secret"},
+                ) as response:
+                    assert response.status == 403
+            assert sender.calls == []
+        finally:
+            await service.stop()
+    asyncio.run(run())
+
+
+def test_group_target_without_verifier_fails_closed(server):
+    """未注入 VoiceHub 客户端时群推送一律拒绝，不得越权发出。"""
+    async def run():
+        service, sender = server
+        service.voicehub_client = None
+        await service.start()
+        port = service._site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as client:
+                async with client.post(f"http://127.0.0.1:{port}/voicehub/push", json={"content": "hello", "targets": {"group": True}}, headers={"X-VoiceHub-Token": "secret"}) as response:
+                    assert response.status == 403
+            assert sender.calls == []
         finally:
             await service.stop()
     asyncio.run(run())

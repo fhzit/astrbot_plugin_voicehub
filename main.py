@@ -74,7 +74,7 @@ class VoiceHubPlugin(Star):
 
         if self.plugin_config.pull_interval_seconds > 0:
             self.pull_client = VoiceHubPullClient(
-                self.plugin_config, self.push_service, logger
+                self.plugin_config, self.push_service, logger, self.voicehub_client
             )
             await self.pull_client.start()
             return
