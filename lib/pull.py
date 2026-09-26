@@ -62,13 +62,16 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
             continue
         if not isinstance(content, str) or not content:
             continue
-        broadcast = raw.get("broadcast") is True
+        if "broadcast" in raw and not isinstance(raw["broadcast"], bool):
+            continue
+        broadcast = raw.get("broadcast", False)
         raw_umos = raw.get("umos")
         if not isinstance(raw_umos, list) or len(raw_umos) > 200:
             continue
         # 不能只丢弃非法目标后把剩余目标投递成功并确认整条队列。
+        expected_type = "GroupMessage" if broadcast else "FriendMessage"
         if any((parsed := parse_umo(umo)) is None or
-               parsed[1] not in {"FriendMessage", "GroupMessage"} for umo in raw_umos):
+               parsed[1] != expected_type for umo in raw_umos):
             continue
         umos: List[str] = raw_umos
         # 既非广播又无有效目标：投递无从下手，跳过以免反复失败重试。

@@ -159,6 +159,17 @@ def test_mixed_invalid_target_must_not_be_silently_acknowledged():
     assert parse_pull_items({"success": True, "items": [raw]}) == []
 
 
+def test_pull_broadcast_flag_must_match_target_type():
+    """广播不能绕过私聊绑定回查，私聊也不能夹带群目标。"""
+    rows = [
+        {"id": 81, "claimToken": CLAIM_TOKEN, "content": "bad broadcast", "broadcast": True,
+         "umos": ["default:FriendMessage:81"]},
+        {"id": 82, "claimToken": CLAIM_TOKEN, "content": "bad private", "broadcast": False,
+         "umos": ["default:GroupMessage:82"]},
+    ]
+    assert parse_pull_items({"success": True, "items": rows}) == []
+
+
 def test_parse_pull_items_rejects_non_success_envelope():
     assert parse_pull_items({"success": False, "items": [{"id": 1, "content": "x"}]}) == []
     assert parse_pull_items({"items": [{"id": 1, "content": "x"}]}) == []
