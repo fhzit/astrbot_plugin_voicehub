@@ -21,9 +21,9 @@ def _install_astrbot_stubs() -> None:
     event = types.ModuleType("astrbot.api.event")
     event.AstrMessageEvent = type("AstrMessageEvent", (), {})
 
-    def command_group(name):  # noqa: ARG001 - 桩只关心装饰器链
+    def command_group(name, **kwargs):  # noqa: ARG001 - 桩只关心装饰器链
         def decorate(fn):
-            fn.command = lambda sub: (lambda method: method)
+            fn.command = lambda sub, **options: (lambda method: method)
             return fn
         return decorate
 

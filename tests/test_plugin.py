@@ -18,9 +18,9 @@ def plugin():
     api.logger = logging.getLogger("test")
     event = types.ModuleType("astrbot.api.event")
     event.AstrMessageEvent = type("AstrMessageEvent", (), {})
-    def group(name):
+    def group(name, **kwargs):
         def decorate(fn):
-            fn.command = lambda sub: lambda method: method
+            fn.command = lambda sub, **options: lambda method: method
             return fn
         return decorate
     event.filter = types.SimpleNamespace(command_group=group)
