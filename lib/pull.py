@@ -63,15 +63,14 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
         if not isinstance(content, str) or not content:
             continue
         broadcast = raw.get("broadcast") is True
-        umos: List[str] = []
         raw_umos = raw.get("umos")
-        if isinstance(raw_umos, list):
-            for umo in raw_umos:
-                # 会话类型必须可解析，且与入站推送同一套白名单：插件只投递
-                # 私聊与群聊，OtherMessage 一律跳过。
-                parsed = parse_umo(umo)
-                if parsed is not None and parsed[1] in {"FriendMessage", "GroupMessage"}:
-                    umos.append(umo)
+        if not isinstance(raw_umos, list) or len(raw_umos) > 200:
+            continue
+        # 不能只丢弃非法目标后把剩余目标投递成功并确认整条队列。
+        if any((parsed := parse_umo(umo)) is None or
+               parsed[1] not in {"FriendMessage", "GroupMessage"} for umo in raw_umos):
+            continue
+        umos: List[str] = raw_umos
         # 既非广播又无有效目标：投递无从下手，跳过以免反复失败重试。
         if not broadcast and not umos:
             continue

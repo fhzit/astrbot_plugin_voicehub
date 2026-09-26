@@ -148,10 +148,15 @@ def test_parse_pull_items_drops_malformed_without_losing_the_rest():
         {"id": 7, "content": "no targets", "umos": []},
         {"id": 8, "content": "mixed", "umos": ["default:FriendMessage:8", "junk"]},
     ]]})
-    assert [item.id for item in items] == [1, 6, 8]
+    assert [item.id for item in items] == [1, 6]
     assert items[0].umos == ["default:FriendMessage:1"]
     assert items[1].broadcast is True
-    assert items[2].umos == ["default:FriendMessage:8"]
+
+def test_mixed_invalid_target_must_not_be_silently_acknowledged():
+    """有目标被丢弃时不得只发送剩余目标再报告整条成功。"""
+    raw = {"id": 8, "claimToken": CLAIM_TOKEN, "content": "mixed",
+           "umos": ["default:FriendMessage:8", "junk"]}
+    assert parse_pull_items({"success": True, "items": [raw]}) == []
 
 
 def test_parse_pull_items_rejects_non_success_envelope():
