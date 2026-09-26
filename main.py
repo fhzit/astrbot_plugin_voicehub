@@ -5,6 +5,9 @@
 并在指令中把绑定码回传给 VoiceHub 校验。
 """
 
+import asyncio
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from astrbot.api import logger
@@ -13,11 +16,15 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .lib.config import VoiceHubConfig, dropped_umo_values
+from .lib.font_manager import ensure_fonts, fonts_already_exist
 from .lib.pull import VoiceHubPullClient
 from .lib.push import PushService
+from .lib.schedule_image import generate_weekly_schedule_image
 from .lib.server import VoiceHubHttpServer
 from .lib.song import SongService
 from .lib.voicehub import VoiceHubClient
+
+_FONT_DIR = Path.home() / ".astrbot/data/plugin_data/astrbot_plugin_voicehub"
 
 
 @register(
@@ -193,5 +200,55 @@ class VoiceHubPlugin(Star):
         yield event.plain_result(await self.song_service.pick(
             event.unified_msg_origin, event.get_group_id(), args
         ))
+
+    @vh.command("本周歌单", alias={"weekly"})
+    async def vh_weekly(self, event: AstrMessageEvent):
+        """发送本周排期图片：/广播 本周歌单"""
+        if not self.plugin_config.song_enabled:
+            yield event.plain_result("点歌功能未启用，请在插件配置中开启。")
+            return
+
+        if not self.plugin_config.voicehub_base_url:
+            yield event.plain_result("插件未配置 VoiceHub 站点地址，无法获取排期。")
+            return
+
+        data = await self.voicehub_client.get_weekly_schedule()
+        if data.get("ok") is False:
+            yield event.plain_result(f"获取排期失败：{data.get('message', '未知错误')}")
+            return
+
+        # 字体首次下载约需 15 秒，提前告知用户
+        font_dir = _FONT_DIR
+        font_dir.mkdir(parents=True, exist_ok=True)
+        if not fonts_already_exist(font_dir):
+            logger.info("[VoiceHub] 首次使用排期图片功能，正在下载字体（约 16 MB），请稍候……")
+
+        try:
+            fonts = await ensure_fonts(font_dir)
+        except Exception as exc:  # noqa: BLE001
+            yield event.plain_result(f"字体下载失败，无法生成排期图片：{exc}")
+            return
+
+        try:
+            img_bytes = await generate_weekly_schedule_image(data, font_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[VoiceHub] 生成排期图片失败: {exc}")
+            yield event.plain_result(f"生成排期图片失败：{exc}")
+            return
+
+        # 写入临时文件，再用 event.image_result 发送
+        with tempfile.NamedTemporaryFile(
+            suffix=".png", prefix="vh_weekly_", delete=False
+        ) as tmp:
+            tmp.write(img_bytes)
+            tmp_path = tmp.name
+
+        try:
+            yield event.image_result(tmp_path)
+        finally:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                pass
 
 

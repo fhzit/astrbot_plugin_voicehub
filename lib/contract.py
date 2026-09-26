@@ -20,5 +20,8 @@ SONG_REQUEST_PATH = "/api/bot/voicehub/song-request"
 # 播出时段列表：站点既有的公开接口（与站点前端 RequestForm 同源）
 PLAY_TIMES_PATH = "/api/play-times"
 
+# 本周排期图片
+WEEKLY_SCHEDULE_PATH = "/api/bot/voicehub/weekly-schedule"
+
 # 双方约定的请求头
 TOKEN_HEADER = "X-VoiceHub-Token"

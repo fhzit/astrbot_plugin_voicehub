@@ -8,7 +8,7 @@ from typing import Any, Optional
 import aiohttp
 
 from .config import VoiceHubConfig
-from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, TOKEN_HEADER
+from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, WEEKLY_SCHEDULE_PATH, TOKEN_HEADER
 
 
 @dataclass
@@ -131,3 +131,34 @@ class VoiceHubClient:
                             and set(verified) == set(umos))
         except Exception:  # noqa: BLE001 - network/timeout/invalid upstream response fails closed
             return False
+
+    async def get_weekly_schedule(self) -> dict:
+        """拉取本周排期数据。
+
+        Returns:
+            VoiceHub 返回的排期 dict；网络异常或配置缺失时返回
+            ``{"ok": False, "message": "..."}``.
+        """
+        if not self.config.voicehub_base_url:
+            return {"ok": False, "message": "插件未配置 VoiceHub 站点地址"}
+        if not self.config.voicehub_token:
+            return {"ok": False, "message": "插件未配置 VoiceHub 令牌"}
+
+        url = f"{self.config.voicehub_base_url}{WEEKLY_SCHEDULE_PATH}"
+        headers = {TOKEN_HEADER: self.config.voicehub_token}
+        timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    url, headers=headers, allow_redirects=False
+                ) as response:
+                    if 300 <= response.status < 400:
+                        return {"ok": False, "message": "VoiceHub 拒绝重定向"}
+                    body = await self._read_json(response)
+                    if response.status >= 400:
+                        return {"ok": False, "message": self._error_message(body, response.status)}
+                    return body
+        except aiohttp.ClientError as exc:
+            return {"ok": False, "message": f"无法连接 VoiceHub：{exc}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"请求 VoiceHub 失败：{exc}"}
