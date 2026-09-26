@@ -38,9 +38,10 @@ class PushService:
             可直接交给 AstrBot 发送的消息链。
         """
         lines: List[str] = []
-        headline = f"{self.config.message_prefix}{title}".strip() if title else self.config.message_prefix.strip()
-        if headline:
-            lines.append(headline)
+        if self.config.message_prefix:
+            lines.append(self.config.message_prefix)
+        if title:
+            lines.append(title)
         if content:
             lines.append(content)
         if url and self.config.include_url:

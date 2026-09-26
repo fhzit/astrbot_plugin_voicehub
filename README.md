@@ -69,7 +69,7 @@ VoiceHub ──POST──▶ 插件     插件 ──POST /api/bot/voicehub/pull
 - 单条通知投递失败会回报 VoiceHub 重试，超过 3 次后标记失败停止重试；
 - **VoiceHub 后台的「推送方向」必须同时选 `pull`**，两边设置要一致，否则 VoiceHub 仍会尝试直连插件。
 
-`group_umos` 在两种模式下都由插件侧生效：拉取模式下广播条目会投递到插件配置的群目标。
+`group_umos` 仅在插件侧生效，且**只对历史遗留的广播条目有效**：VoiceHub 的四平台独立开关下已无法按平台校验群接收目标，因此 VoiceHub 不再发起群广播。当前插件保留对 `broadcast` 条目的处理，仅用于兼容旧队列数据。
 
 ## 快速开始
 
@@ -98,7 +98,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `listen_host` / `listen_port`：默认 `0.0.0.0:6199`。VoiceHub 与 AstrBot 同机时建议填 `127.0.0.1`；跨机部署必须让防火墙/反向代理放行该端口。
 - `public_base_url`：对外展示的 HTTPS 地址（不带 `/voicehub/push`），仅用于在 `/vh status` 和日志里显示可填写的推送地址。
 - `allowed_ips`：可选，逗号分隔。**只匹配实际 TCP 对端**，不信任 `X-Forwarded-For`；反向代理部署时填代理地址，并在代理层另行实施上游 IP 白名单。
-- `message_prefix`：可选，推送时加在标题前的前缀，例如 `校园广播站`。
+- `message_prefix`：可选，推送时单独占一行，位于标题和正文之前，例如 `校园广播站`。
 - `include_url`：默认开启。关闭后只推送标题与正文，不带 VoiceHub 站点链接。
 - `voicehub_base_url`：VoiceHub 站点地址，例如 `https://voicehub.example.com`。**绑定/解绑/私聊回查都依赖它**；留空则绑定指令不可用（推送仍可用）。
 - `voicehub_token`：回查 VoiceHub 用的令牌，留空复用 `webhook_token`（一般无需单独填写）。
@@ -112,18 +112,18 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 
 管理员 → 站点设置 → `AstrBot 通知配置`：
 
-1. 勾选 **启用 AstrBot 通知**；
-2. **推送方向**按部署方式选：VoiceHub 能访问插件用 `push`（默认）；插件在内网/NAT 后用 `pull`，并与插件侧 `pull_interval_seconds` 配合；
-3. `AstrBot 服务地址` 填插件的对外地址，例如 `https://astrbot.example.com:6199`（`pull` 模式下仅作展示，不参与投递）；
-4. `访问令牌` 填与插件 `webhook_token` **完全相同**的值（页面不会回显已有密钥，留空表示保持不变）；
-5. 需要群广播时勾选 **启用广播通知**（只控制 VoiceHub 是否发起广播，接收的群在插件侧配置）；
+1. 勾选 **启用机器人通知总开关**；
+2. 在 **启用 QQ / 企业微信 / 钉钉 / 飞书** 中勾选要开放的平台，勾选后用户账号页才会出现对应平台的绑定卡片；
+3. **推送方向**按部署方式选：VoiceHub 能访问插件用 `push`（默认）；插件在内网/NAT 后用 `pull`，并与插件侧 `pull_interval_seconds` 配合；
+4. `AstrBot 服务地址` 填插件的对外地址，例如 `https://astrbot.example.com:6199`。**`pull` 模式下可留空**（只作展示，不参与投递；地址仅在 `push` 模式下必填）；
+5. `访问令牌` 填与插件 `webhook_token` **完全相同**的值（页面不会回显已有密钥，留空表示保持不变）；
 6. 保存。
 
-用户侧在 `账号设置 → QQ 私聊通知（AstrBot）` 里生成一次性绑定码，然后在**机器人私聊**中发送 `/vh bind <绑定码>` 完成绑定。
+通知只投递到**用户自己已绑定并启用**的私聊会话；群广播在四平台独立开关下已停用（无法按平台校验群接收目标）。用户侧在 `账号设置 → 账号绑定` 里为每个已启用平台分别生成一次性绑定码，然后在**对应平台的机器人私聊**中发送 `/vh bind <绑定码>` 完成绑定。
 
-### 4. 配置群广播目标
+### 4. 配置群广播目标（仅历史遗留兼容）
 
-群广播的接收群**不能由用户选择**，只能由管理员在插件配置里填写：
+VoiceHub 已不再发起群广播：四平台独立开关下无法按平台校验群接收目标。`group_umos` 现在只对**旧队列里已存在的广播条目**生效，用于兼容升级前入队、尚未投递的数据。配置方式（如需人工排查历史条目）：
 
 1. 把机器人拉进目标群；
 2. 在群里发送 `/vh status`；
@@ -193,7 +193,7 @@ default:GroupMessage:123456789
 - `POST /api/bot/voicehub/bind`：`{"code": "一次性绑定码", "umo": "...", "platform": "适配器名"}`
 - `POST /api/bot/voicehub/unbind`：`{"umo": "..."}`
 - `POST /api/bot/voicehub/verify-targets`：`{"umos": ["..."]}`。VoiceHub **必须验证令牌，并且只对当前有效的私聊绑定逐个核对**；全部有效时返回 HTTP 200 `{"success": true, "umos": [...]}`，列表需与请求完全一致（顺序可不同）。插件要求严格的成功标志、完整精确列表和 200，任一不符或不可用时整批拒绝。
-- `POST /api/bot/voicehub/pull`：拉取模式取件，`{}`。返回 `{"success": true, "items": [{"id": 1, "title": "...", "content": "...", "url": "...", "umos": ["..."], "broadcast": false}]}`；**每个目标都须在入队前已确认为有效绑定**，插件不在此处回查。
+- `POST /api/bot/voicehub/pull`：拉取模式取件，`{}`。返回 `{"success": true, "items": [{"id": 1, "title": "...", "content": "...", "url": "...", "umos": ["..."], "broadcast": false}]}`；**每个目标在入队时已确认为有效绑定，VoiceHub 在领取时会再核对绑定归属**（解绑、平台停用或会话易主的目标不会出现在取件结果里），插件不在此处回查。
 - `POST /api/bot/voicehub/ack`：拉取模式回执，`{"results": [{"id": 1, "success": true}]}`；失败项可带 `reason`。VoiceHub 据此标记已投递或安排重试（超过尝试上限后停止）。
 
 VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"success": false, "message": "原因"}`；缺少 `success: true` 按失败处理。令牌校验、绑定码有效期、私聊归属与重绑规则都由 VoiceHub 负责。
@@ -216,7 +216,7 @@ VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"
 | VoiceHub 报 401 | 两侧令牌不一致，或反向代理把 `X-VoiceHub-Token` 过滤掉了。 |
 | VoiceHub 报 403「私聊目标未获授权」 | 用户未绑定、绑定已失效，或插件没配 `voicehub_base_url`，或回查超时/被重定向。 |
 | VoiceHub 报 400「群会话未被管理员授权」 | 该群不在 `group_umos` 中。 |
-| 群广播收不到 | 看启动日志的「形状非法，已忽略」告警；用 `/vh status` 重新取值。拉取模式下还需确认 VoiceHub 后台推送方向已选 `pull`。 |
+| 群广播收不到 | VoiceHub 已停用群广播（无法按平台校验群接收目标），只有升级前入队的旧广播条目仍会投递到 `group_umos`；先看启动日志的「形状非法，已忽略」告警，用 `/vh status` 重新取群会话串。 |
 | 拉取模式不工作 | 检查 `pull_interval_seconds` > 0、`voicehub_base_url` 与令牌齐全；`/vh status` 的服务行会显示「拉取模式（每 N 秒…）」。 |
 | 绑定失败「插件未配置 VoiceHub 站点地址」 | 填 `voicehub_base_url`。 |
 | 通知「发送成功」但没收到 | 适配器返回成功只说明 AstrBot 找到了对应平台实例，不保证第三方平台最终送达；用 `/vh test` 和 `/vh status` 先排除会话问题，再查平台侧限制。 |
