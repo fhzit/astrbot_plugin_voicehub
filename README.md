@@ -1,16 +1,39 @@
-# AstrBot VoiceHub 推送插件
+<div align="center">
 
-把 [VoiceHub](https://github.com/laoshuikaixue/VoiceHub) 的通知投递到 AstrBot 已加载的聊天平台会话。
+# 📻 VoiceHub 广播助手
 
-VoiceHub 常驻在服务器上，本插件作为它与聊天平台之间的**出站网关**：VoiceHub 通过插件的独立 HTTP 端口把通知交给 AstrBot，插件再用 AstrBot 的 `context.send_message` 发到指定会话。插件不保存任何业务状态（用户与会话的绑定关系全部由 VoiceHub 维护）。
+*将校园广播通知、点歌与本周排期带进聊天窗口*
+
+[![AstrBot](https://img.shields.io/badge/framework-AstrBot-ff6b6b?style=flat-square)](https://github.com/AstrBotDevs/AstrBot)
+[![VoiceHub](https://img.shields.io/badge/service-VoiceHub-7c3aed?style=flat-square)](https://github.com/laoshuikaixue/VoiceHub)
+
+</div>
+
+## ✨ 简介
+
+这是 [VoiceHub](https://github.com/laoshuikaixue/VoiceHub) 的 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 插件：用户可在机器人私聊绑定账号、点歌，发送 `/广播 本周歌单` 获取排期图片；VoiceHub 也能把账户通知送到已绑定的私聊会话。插件不保存绑定关系，账号与排期数据由 VoiceHub 管理。
 
 - 插件仓库：<https://github.com/fhzit/astrbot_plugin_voicehub>
-- 适配器：`aiocqhttp`（OneBot v11）、`qq_official` / `qq_official_webhook`、`wecom_ai_bot`、`lark`、`dingtalk`
-- 开发与测试基于 AstrBot `4.28.x`；Python 依赖仅 `aiohttp`
+- 适配器：`aiocqhttp`（OneBot v11）、`qq_official` / `qq_official_webhook`、`wecom_ai_bot`、`lark`、`dingtalk`；实际可用功能取决于平台发送能力。
+- 通知支持 VoiceHub 主动推送（`push`）和插件主动取件（`pull`），两侧模式必须一致。
+- Python 依赖见 [`requirements.txt`](./requirements.txt)；歌单图片由 Pillow 绘制，中文字体首次使用时下载并缓存。
 
-## 特性
+## ✨ 功能特性
 
-- **出站/入站分离**：插件在 AstrBot 进程内监听一个独立端口接收推送；插件自身不发起定时任务或长连接。
+- 🔗 **私聊绑定**：VoiceHub 生成一次性绑定码，在机器人私聊完成绑定或解绑。
+- 🔔 **精准通知**：仅投递当前有效的私聊绑定，QQ、企微、钉钉、飞书可分别启用。
+- 🎵 **私聊点歌**：搜索歌曲、按序号投稿，可选播出时段和点歌券，遵循站点投稿规则。
+- 🖼️ **本周歌单**：读取已发布排期，插件用 Pillow 生成图片，显示项由 VoiceHub 后台独立配置。
+- 🛡️ **安全投递**：共享令牌、可选 IP 白名单、目标回查与重定向拒绝。
+- 🔄 **适配 NAT**：`pull` 模式只要求插件能出站访问 VoiceHub，不必暴露插件端口。
+
+> **导出方案说明**：打印排期的方案存于浏览器 localStorage，插件不能直接选择它；后台「本周歌单图片显示项」是独立配置。Pillow 图片也不是网页打印样式的像素级复刻。
+
+---
+
+## 🔒 安全与投递细节
+
+- **出站/入站分离**：`push` 模式在 AstrBot 进程内监听独立端口；`pull` 模式由插件定时取件，不开放入站端口。
 - **令牌 + IP 白名单**：入站请求必须携带共享令牌（常量时间比较），可选按真实 TCP 对端做 IP 白名单。
 - **显式目标，不做隐式群发**：请求必须写明目标会话，缺失 `targets` 直接拒绝，避免把通知洒进机器人所在的所有群。
 - **私聊目标需回查**：私聊会话在推送前向 VoiceHub 逐个核对**当前有效绑定**，核对不通过则整批拒绝（含其中的群目标），防止把通知推给已解绑的用户。
@@ -108,6 +131,8 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `song_enabled`：默认开启。关闭后 `/广播 点歌` 与 `/广播 选歌` 回复「点歌功能未启用。」。
 - `song_result_count`：点歌搜索展示的候选条数，默认 5，**上限 5**（超出按 5 处理）。
 
+首次生成歌单图片会自动下载 HarmonyOS Sans SC 字体到插件数据目录并缓存；若下载失败，指令会报错，请检查 AstrBot 出站网络后重试。无需额外部署浏览器或生图服务。
+
 生产环境请用 TLS 反向代理，不要在公网明文传输令牌。
 
 ### 3. 在 VoiceHub 后台启用机器人推送
@@ -119,7 +144,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 3. **推送方向**按部署方式选：VoiceHub 能访问插件用 `push`（默认）；插件在内网/NAT 后用 `pull`，并与插件侧 `pull_interval_seconds` 配合；
 4. `AstrBot 服务地址` 填插件的对外地址，例如 `https://astrbot.example.com:6199`。**`pull` 模式下可留空**（只作展示，不参与投递；地址仅在 `push` 模式下必填）；
 5. `访问令牌` 填与插件 `webhook_token` **完全相同**的值（页面不会回显已有密钥，留空表示保持不变）；
-6. 保存。
+6. 在 **本周歌单图片显示项** 中分别设置封面、序号、投稿人、票数、播出时段和日期，点击保存。此处为全站共享设置，**不是**打印排期页面浏览器本地的导出方案。
 
 通知只投递到**用户自己已绑定并启用**的私聊会话；群广播在四平台独立开关下已停用（无法按平台校验群接收目标）。用户侧在 `账号设置 → 账号绑定` 里为每个已启用平台分别生成一次性绑定码，然后在**对应平台的机器人私聊**中发送 `/广播 绑定 <绑定码>` 完成绑定。
 
@@ -153,8 +178,9 @@ default:GroupMessage:123456789
 | `/广播 自检` | 向当前会话发送一条测试通知，不经过 VoiceHub。 |
 | `/广播 点歌 <关键词>` | 搜索歌曲并列出候选（见下节）。**仅私聊可用。** |
 | `/广播 选歌 <序号> [时段=<时段序号>] [点歌券=<券码>]` | 按序号投稿。**仅私聊可用。** |
+| `/广播 本周歌单` | 返回本周已发布排期的图片；图片字段由 VoiceHub 后台配置。 |
 
-**兼容旧写法**：英文旧名（`bind` / `unbind` / `status` / `test` / `song` / `pick`）只作为别名存在，例如 `/vh bind`；文档一律以中文指令为准。`/广播 选歌` 的参数键也兼容英文旧键 `time=` / `card=`。
+**兼容旧写法**：英文旧名（`bind` / `unbind` / `status` / `test` / `song` / `pick` / `weekly`）只作为别名存在，例如 `/vh bind`；文档一律以中文指令为准。`/广播 选歌` 的参数键也兼容英文旧键 `time=` / `card=`。
 
 指令唤醒前缀由 AstrBot 配置控制（默认 `/`），实际消息需符合唤醒规则。**不要在群里公开一次性绑定码。**
 
@@ -195,6 +221,12 @@ default:GroupMessage:123456789
 - 未配置 `voicehub_base_url` 时回复「插件未配置 VoiceHub 站点地址，无法点歌。」
 - 站点的错误文案（如未绑定、券码无效、同曲限制）原样回给用户；网络异常回复「无法连接 VoiceHub，请稍后重试。」
 - 待选状态只存在内存，AstrBot 重启后需重新搜索。
+
+### 本周歌单图片
+
+发送 `/广播 本周歌单`，插件向 VoiceHub 查询**北京时间本周已发布**的排期（草稿不展示），并返回一张 PNG；没有排期时显示「本周暂无排期」。需要插件启用 `song_enabled`、填写 `voicehub_base_url`，以及配置与 VoiceHub 一致的访问令牌。首次调用会下载中文字体，此后复用缓存。
+
+管理员在 VoiceHub 后台 **机器人通知配置 → 本周歌单图片显示项** 勾选封面、序号、投稿人、票数、播出时段和日期后保存。设置对下一次查询生效；它不读取打印排期浏览器中的导出方案。
 
 ## HTTP 接口契约
 
@@ -243,6 +275,7 @@ default:GroupMessage:123456789
 - `POST /api/bot/voicehub/ack`：拉取模式回执，`{"results": [{"id": 1, "success": true}]}`；失败项可带 `reason`。VoiceHub 据此标记已投递或安排重试（超过尝试上限后停止）。
 - `POST /api/bot/voicehub/song-search`：点歌搜索，`{"umo": "...", "keyword": "告白气球", "platform": "netease", "page": 1}`。返回 `{"success": true, "platform": "netease", "keyword": "告白气球", "sessionToken": "<密封票据>", "items": [{"index": 1, "title": "...", "artist": "...", "durationSeconds": 215}]}`；候选不出现在列表里时 `items` 为空数组。
 - `POST /api/bot/voicehub/song-request`：点歌投稿，`{"umo": "...", "sessionToken": "<song-search 返回的票据>", "index": 2, "playTimeId": 2, "cardCode": "ABCD1234", "note": "..."}`（后三项可选）。成功返回 `{"success": true, "songId": 123, "message": "点歌成功：告白气球 - 周杰伦"}`；站点侧错误（未绑定、票据过期、序号越界、券码无效、同曲限制等）的文案原样回给用户。
+- `GET /api/bot/voicehub/weekly-schedule`：查询北京时间本周已发布排期，返回 `weekRange`、`siteTitle`、`schedules` 和管理员保存的 `displayConfig` 六个布尔显示项；由插件绘制图片，接口本身不返回图片。
 
 点歌接口不走公共白名单，与其它机器人回调一样只认 `X-VoiceHub-Token`。播出时段列表用站点既有的公开接口 `GET /api/play-times`（与站点前端同源）；若站点未开放时段选择，插件回复「当前未开放播出时段选择。」。
 
@@ -267,7 +300,9 @@ VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"
 | VoiceHub 报 403「私聊目标未获授权」 | 用户未绑定、绑定已失效，或插件没配 `voicehub_base_url`，或回查超时/被重定向。 |
 | VoiceHub 报 400「群会话未被管理员授权」 | 该群不在 `group_umos` 中。 |
 | 群广播收不到 | VoiceHub 已停用群广播（无法按平台校验群接收目标），只有升级前入队的旧广播条目仍会投递到 `group_umos`；先看启动日志的「形状非法，已忽略」告警，用 `/广播 状态` 重新取群会话串。 |
-| 拉取模式不工作 | 检查 `pull_interval_seconds` > 0、`voicehub_base_url` 与令牌齐全；`/广播 状态` 的服务行会显示「拉取模式（每 N 秒…）」。 |
+| 拉取模式不工作 | 检查 `pull_interval_seconds` > 0、`voicehub_base_url` 与令牌齐全；VoiceHub 后台推送方向也必须为 `pull`。 |
+| `/广播 本周歌单` 提示字体下载失败 | 检查 AstrBot 容器访问字体 CDN 的出站网络和插件数据目录写权限，稍后重试。 |
+| 歌单图片显示项与打印方案不一致 | 图片字段在 VoiceHub 后台「本周歌单图片显示项」单独设置，不读取浏览器本地打印方案。 |
 | 绑定失败「插件未配置 VoiceHub 站点地址」 | 填 `voicehub_base_url`。 |
 | 通知「发送成功」但没收到 | 适配器返回成功只说明 AstrBot 找到了对应平台实例，不保证第三方平台最终送达；用 `/广播 自检` 和 `/广播 状态` 先排除会话问题，再查平台侧限制。 |
 | 想确认插件在监听 | `curl -H "X-VoiceHub-Token: <token>" http://127.0.0.1:6199/voicehub/health`。 |
@@ -295,6 +330,8 @@ lib/push.py          消息链构造与多目标推送
 lib/pull.py          拉取模式：主动取件、投递与回执
 lib/voicehub.py      回调 VoiceHub 的客户端（绑定/解绑/回查）
 lib/song.py          点歌：搜索/投稿客户端与内存待选状态
+lib/font_manager.py  中文字体按需下载与缓存
+lib/schedule_image.py 本周歌单的 Pillow 图片绘制
 _conf_schema.json    管理面板配置项定义
 tests/               桩 astrbot + 桩 VoiceHub 的测试套件
 ```
