@@ -295,6 +295,20 @@ def test_partial_failure_reports_failed_targets_for_retry():
         stub.stop()
 
 
+def test_incomplete_success_count_is_not_acked_as_delivered():
+    """无失败列表但发送数不足时，不能把整条通知确认成功。"""
+    stub = _StubVoiceHub([
+        {"id": 42, "content": "计数不足", "umos": ["default:FriendMessage:421", "default:FriendMessage:422"]},
+    ]).start()
+    try:
+        recorder = _PushRecorder(sent=1, failed=[])
+        client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
+        asyncio.run(client.run_once())
+        assert stub.acks[0]["results"][0]["success"] is False
+    finally:
+        stub.stop()
+
+
 def test_delivery_failure_reports_reason_for_vh_retry():
     """全部失败时回报失败与原因，由 VoiceHub 侧按尝试上限重试。"""
     stub = _StubVoiceHub([{"id": 51, "content": "失败", "umos": ["default:FriendMessage:511"]}]).start()

@@ -233,8 +233,9 @@ class VoiceHubPullClient:
                             "reason": str(outcome.failed[0].get("reason", "投递失败"))[:200]}
                 return {"id": item.id, "claimToken": item.claim_token, "success": False,
                         "reason": "目标结果不完整，需重试"}
-            if outcome.sent <= 0:
-                return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "投递失败"}
+            if outcome.sent != len(deduped):
+                return {"id": item.id, "claimToken": item.claim_token, "success": False,
+                        "reason": "目标结果不完整，需重试"}
             return {"id": item.id, "claimToken": item.claim_token, "success": True}
         except Exception as exc:  # noqa: BLE001 - 单条失败不得中断整批
             return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": str(exc)[:200]}
