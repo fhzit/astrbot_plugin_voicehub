@@ -179,6 +179,17 @@ def test_show_requester_and_votes_flags():
         assert isinstance(result, bytes) and len(result) > 0
 
 
+def test_show_date_hides_date_group():
+    """关闭日期显示后画布高度应减少每个日期组的标题高度。"""
+    from astrbot_plugin_voicehub.lib.schedule_image import generate_weekly_schedule_image
+    data = _make_data(show_cover=False)
+    data["displayConfig"]["showDate"] = True
+    shown = PILImage.open(io.BytesIO(asyncio.run(generate_weekly_schedule_image(data, Path("/mock/fonts")))))
+    data["displayConfig"]["showDate"] = False
+    hidden = PILImage.open(io.BytesIO(asyncio.run(generate_weekly_schedule_image(data, Path("/mock/fonts")))))
+    assert shown.height - hidden.height == 72
+
+
 def test_cover_fetch_failure_does_not_raise():
     """封面下载失败（抛异常）不影响整体图片生成。"""
     from astrbot_plugin_voicehub.lib import schedule_image as si

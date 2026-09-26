@@ -197,7 +197,8 @@ def _draw_image(
         total_h += 60  # 空状态提示
     else:
         for _date, items in date_groups:
-            total_h += 36  # 日期组标题
+            if show_date:
+                total_h += 36  # 日期组标题
             time_groups: list[tuple[str, list[dict]]] = []
             for pt, tms in groupby(items, key=_time_key):
                 time_groups.append((pt, list(tms)))
@@ -242,19 +243,11 @@ def _draw_image(
         idx_global = 0  # 用于索引 covers 字典
 
         for date, items in date_groups:
-            # ── 日期组标题 ────────────────────────────────────
-            # 背景
-            draw.rectangle([(0, y), (IMG_W, y + 36)], fill=C_GROUP_BG)
-            # 左侧紫色边框
-            draw.rectangle([(PAD_H, y + 4), (PAD_H + 3, y + 32)], fill=C_GROUP_BAR)
-            # 日期文字
-            draw.text(
-                (PAD_H + 12, y + 10),
-                date,
-                font=B[FS_GROUP],
-                fill=C_GROUP_TEXT,
-            )
-            y += 36
+            if show_date:
+                draw.rectangle([(0, y), (IMG_W, y + 36)], fill=C_GROUP_BG)
+                draw.rectangle([(PAD_H, y + 4), (PAD_H + 3, y + 32)], fill=C_GROUP_BAR)
+                draw.text((PAD_H + 12, y + 10), date, font=B[FS_GROUP], fill=C_GROUP_TEXT)
+                y += 36
 
             time_groups: list[tuple[str, list[dict]]] = []
             for pt, tms in groupby(items, key=_time_key):
