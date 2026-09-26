@@ -13,5 +13,12 @@ VERIFY_TARGETS_PATH = "/api/bot/voicehub/verify-targets"
 PULL_PATH = "/api/bot/voicehub/pull"
 ACK_PATH = "/api/bot/voicehub/ack"
 
+# 点歌：插件回查 VoiceHub 的搜索与投稿接口
+SONG_SEARCH_PATH = "/api/bot/voicehub/song-search"
+SONG_REQUEST_PATH = "/api/bot/voicehub/song-request"
+
+# 播出时段列表：站点既有的公开接口（与站点前端 RequestForm 同源）
+PLAY_TIMES_PATH = "/api/play-times"
+
 # 双方约定的请求头
 TOKEN_HEADER = "X-VoiceHub-Token"

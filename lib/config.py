@@ -147,6 +147,10 @@ class VoiceHubConfig:
     # 拉取模式的轮询间隔（秒）；0 表示不启用拉取（VoiceHub 可访问插件时用 push 即可）。
     pull_interval_seconds: int = 0
 
+    # 点歌指令（仅私聊可用）
+    song_enabled: bool = True
+    song_result_count: int = 5
+
     @classmethod
     def from_mapping(cls, raw: Optional[Mapping[str, Any]]) -> "VoiceHubConfig":
         """从 AstrBot 注入的插件配置构造实例。
@@ -177,6 +181,8 @@ class VoiceHubConfig:
                 "voicehub_base_url",
                 "voicehub_token",
                 "pull_interval_seconds",
+                "song_enabled",
+                "song_result_count",
             ):
                 value = getattr(raw, "get", None)
                 if callable(value):
@@ -200,6 +206,9 @@ class VoiceHubConfig:
             voicehub_base_url=str(data.get("voicehub_base_url") or "").strip().rstrip("/"),
             voicehub_token=voicehub_token,
             pull_interval_seconds=max(0, _as_int(data.get("pull_interval_seconds"), 0)),
+            song_enabled=_as_bool(data.get("song_enabled"), True),
+            # 上限 5：聊天里展示更多条目没有意义，也不给站点增加无谓压力
+            song_result_count=min(5, max(1, _as_int(data.get("song_result_count"), 5))),
         )
 
     @property

@@ -16,6 +16,7 @@ from .lib.config import VoiceHubConfig, dropped_umo_values
 from .lib.pull import VoiceHubPullClient
 from .lib.push import PushService
 from .lib.server import VoiceHubHttpServer
+from .lib.song import SongService
 from .lib.voicehub import VoiceHubClient
 
 
@@ -34,6 +35,7 @@ class VoiceHubPlugin(Star):
         self.plugin_config = VoiceHubConfig.from_mapping(config)
         self.voicehub_client = VoiceHubClient(self.plugin_config)
         self.push_service = PushService(self.context, self.plugin_config, logger)
+        self.song_service = SongService(self.plugin_config)
         self.http_server: Optional[VoiceHubHttpServer] = None
         self.pull_client: Optional[VoiceHubPullClient] = None
 
@@ -60,7 +62,7 @@ class VoiceHubPlugin(Star):
             if dropped:
                 logger.warning(
                     f"[VoiceHub] 以下群广播会话形状非法，已忽略：{dropped}。"
-                    "正确格式示例：default:GroupMessage:123456（请在群内发送 /vh status 取值）。"
+                    "正确格式示例：default:GroupMessage:123456（请在群内发送 /广播 状态 取值）。"
                 )
 
         if self.plugin_config.pull_interval_seconds > 0:
@@ -95,13 +97,13 @@ class VoiceHubPlugin(Star):
     # 指令
     # ------------------------------------------------------------------
 
-    @filter.command_group("vh")
+    @filter.command_group("广播", alias={"vh"})
     def vh(self):
-        """VoiceHub 推送相关指令组。"""
+        """VoiceHub 相关指令组（`/广播`，兼容旧写法 `/vh`）。"""
 
-    @vh.command("bind")
+    @vh.command("绑定", alias={"bind"})
     async def vh_bind(self, event: AstrMessageEvent, code: GreedyStr):
-        """绑定 VoiceHub 账号：/vh bind <绑定码>"""
+        """绑定 VoiceHub 账号：/广播 绑定 <绑定码>"""
         if not self.plugin_config.webhook_token:
             yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
             return
@@ -117,7 +119,7 @@ class VoiceHubPlugin(Star):
         code = code.strip()
         if not code or len(code.split()) != 1:
             yield event.plain_result(
-                "用法：/vh bind <绑定码>。绑定码请在 VoiceHub 的「机器人推送」中生成。"
+                "用法：/广播 绑定 <绑定码>。绑定码请在 VoiceHub 的「机器人推送」中生成。"
             )
             return
 
@@ -131,9 +133,9 @@ class VoiceHubPlugin(Star):
         else:
             yield event.plain_result(f"绑定失败：{result.message}")
 
-    @vh.command("unbind")
+    @vh.command("解绑", alias={"unbind"})
     async def vh_unbind(self, event: AstrMessageEvent):
-        """解绑当前会话：/vh unbind"""
+        """解绑当前会话：/广播 解绑"""
         if not self.plugin_config.webhook_token:
             yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
             return
@@ -144,9 +146,9 @@ class VoiceHubPlugin(Star):
         else:
             yield event.plain_result(f"解绑失败：{result.message}")
 
-    @vh.command("status")
+    @vh.command("状态", alias={"status"})
     async def vh_status(self, event: AstrMessageEvent):
-        """查看当前会话的推送状态与会话 ID。"""
+        """查看当前会话的推送状态与会话 ID：/广播 状态"""
         platform = event.get_platform_name()
         message_type = "群聊" if event.get_group_id() else "私聊"
         if self.pull_client:
@@ -163,9 +165,9 @@ class VoiceHubPlugin(Star):
             f"- 服务：{endpoint}"
         )
 
-    @vh.command("test")
+    @vh.command("自检", alias={"test"})
     async def vh_test(self, event: AstrMessageEvent):
-        """向当前会话发送一条测试通知。"""
+        """向当前会话发送一条测试通知：/广播 自检"""
         result = await self.push_service.push_text(
             [event.unified_msg_origin],
             "VoiceHub 测试通知",
@@ -177,5 +179,19 @@ class VoiceHubPlugin(Star):
         yield event.plain_result(
             f"测试推送完成：成功 {result.sent} 个会话，失败 {len(result.failed)} 个。"
         )
+
+    @vh.command("点歌", alias={"song"})
+    async def vh_song(self, event: AstrMessageEvent, keyword: GreedyStr):
+        """搜索歌曲：/广播 点歌 <关键词>（`时段` 为保留字，用于查看播出时段）"""
+        yield event.plain_result(await self.song_service.song(
+            event.unified_msg_origin, event.get_group_id(), keyword
+        ))
+
+    @vh.command("选歌", alias={"pick"})
+    async def vh_pick(self, event: AstrMessageEvent, args: GreedyStr):
+        """按序号投稿：/广播 选歌 <序号> [时段=时段序号] [点歌券=券码]"""
+        yield event.plain_result(await self.song_service.pick(
+            event.unified_msg_origin, event.get_group_id(), args
+        ))
 
 
