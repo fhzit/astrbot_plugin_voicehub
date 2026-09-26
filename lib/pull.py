@@ -29,6 +29,7 @@ class PullItem:
     url: Optional[str]
     umos: List[str]
     broadcast: bool
+    claim_token: str
 
 
 def parse_pull_items(payload: Any) -> List[PullItem]:
@@ -53,8 +54,11 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
         if not isinstance(raw, dict):
             continue
         item_id = raw.get("id")
+        claim_token = raw.get("claimToken")
         content = raw.get("content")
         if not isinstance(item_id, int) or isinstance(item_id, bool) or item_id <= 0:
+            continue
+        if not isinstance(claim_token, str) or len(claim_token) != 64 or any(c not in "0123456789abcdef" for c in claim_token):
             continue
         if not isinstance(content, str) or not content:
             continue
@@ -80,6 +84,7 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
             url=url if isinstance(url, str) and url else None,
             umos=umos,
             broadcast=broadcast,
+            claim_token=claim_token,
         ))
     return items
 
@@ -183,19 +188,15 @@ class VoiceHubPullClient:
             回执项。广播条目在无有效群目标时按失败回报，避免被静默丢弃。
         """
         try:
-            targets = list(self.push_service.group_targets()) if item.broadcast else []
-            targets = [umo for umo in targets if parse_umo(umo) is not None]
-            if item.broadcast:
-                targets.extend(item.umos)
-            else:
-                targets = item.umos
+            # 群目标只由 VoiceHub 条目决定；本机列表仅作为可选的附加限制。
+            targets = item.umos
             # 去重但保持顺序，同一会话不重复投递。
             deduped: List[str] = []
             for umo in targets:
                 if umo not in deduped:
                     deduped.append(umo)
             if not deduped:
-                return {"id": item.id, "success": False, "reason": "没有可用的群广播目标"}
+                return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "没有可用的群广播目标"}
 
             # 群目标必须由 VoiceHub 白名单确认后再投递：拉取模式下 VoiceHub 虽已按
             # 白名单过滤过，但队列条目可能是在授权被撤销前入队的，因此这里再回查一次，
@@ -205,32 +206,39 @@ class VoiceHubPullClient:
                 # 第二道闸门：本机 group_umos 非空时只放行其中的群。
                 local_groups = set(self.push_service.group_targets())
                 if local_groups and any(umo not in local_groups for umo in group_targets):
-                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
+                    return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "群目标未获授权或无法验证"}
                 if self.voicehub_client is None:
                     # 未注入客户端时无从确认授权，宁可不发也不越权。
-                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
+                    return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "群目标未获授权或无法验证"}
                 try:
                     authorized = await self.voicehub_client.verify_group_targets(group_targets)
                 except Exception as exc:  # noqa: BLE001 - 回查故障时不得投递
                     self.logger.warning(f"[VoiceHub] 群目标回查失败: {exc}")
                     authorized = False
                 if not authorized:
-                    return {"id": item.id, "success": False, "reason": "群目标未获授权或无法验证"}
+                    return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "群目标未获授权或无法验证"}
 
             outcome: PushResult = await self.push_service.push_text(
                 deduped, item.title, item.content, item.url
             )
-            if outcome.sent <= 0:
-                reason = outcome.failed[0].get("reason") if outcome.failed else "投递失败"
-                return {"id": item.id, "success": False, "reason": str(reason)[:200]}
             if outcome.failed:
-                # 部分失败仍算投递完成，避免整条通知被重复推送。
                 self.logger.warning(
                     f"[VoiceHub] 通知 {item.id} 部分目标投递失败: {outcome.failed}"
                 )
-            return {"id": item.id, "success": True}
+                failed_umos = [entry.get("umo") for entry in outcome.failed]
+                if (outcome.sent + len(failed_umos) == len(deduped) and
+                        len(failed_umos) == len(set(failed_umos)) and
+                        all(isinstance(umo, str) and umo in deduped for umo in failed_umos)):
+                    return {"id": item.id, "claimToken": item.claim_token, "success": False,
+                            "failedUmos": failed_umos,
+                            "reason": str(outcome.failed[0].get("reason", "投递失败"))[:200]}
+                return {"id": item.id, "claimToken": item.claim_token, "success": False,
+                        "reason": "目标结果不完整，需重试"}
+            if outcome.sent <= 0:
+                return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": "投递失败"}
+            return {"id": item.id, "claimToken": item.claim_token, "success": True}
         except Exception as exc:  # noqa: BLE001 - 单条失败不得中断整批
-            return {"id": item.id, "success": False, "reason": str(exc)[:200]}
+            return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": str(exc)[:200]}
 
     async def _ack(
         self, session: aiohttp.ClientSession, headers: Dict[str, str], results: List[Dict[str, Any]]

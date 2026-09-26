@@ -12,12 +12,14 @@ from astrbot_plugin_voicehub.lib.config import VoiceHubConfig
 from astrbot_plugin_voicehub.lib.pull import VoiceHubPullClient, parse_pull_items
 from astrbot_plugin_voicehub.lib.voicehub import VoiceHubClient
 
+CLAIM_TOKEN = "a" * 64
+
 
 class _StubVoiceHub:
     """桩 VoiceHub：记录收到的取件与回执请求，按预设返回条目。"""
 
     def __init__(self, items, allowed_groups=None):
-        self.items = items
+        self.items = [{**item, "claimToken": CLAIM_TOKEN} for item in items]
         self.pulls = 0
         self.acks = []
         self.verify_requests = []
@@ -136,7 +138,7 @@ def _config(base_url, token="t0ken", interval=1):
 
 def test_parse_pull_items_drops_malformed_without_losing_the_rest():
     """单条脏数据只跳过该条，不影响同一批的其他通知。"""
-    items = parse_pull_items({"success": True, "items": [
+    items = parse_pull_items({"success": True, "items": [{**item, "claimToken": CLAIM_TOKEN} for item in [
         {"id": 1, "content": "ok", "umos": ["default:FriendMessage:1"]},
         {"id": "2", "content": "bad id", "umos": ["default:FriendMessage:2"]},
         {"id": 3, "content": "", "umos": ["default:FriendMessage:3"]},
@@ -145,7 +147,7 @@ def test_parse_pull_items_drops_malformed_without_losing_the_rest():
         {"id": 6, "content": "broadcast ok", "umos": [], "broadcast": True},
         {"id": 7, "content": "no targets", "umos": []},
         {"id": 8, "content": "mixed", "umos": ["default:FriendMessage:8", "junk"]},
-    ]})
+    ]]})
     assert [item.id for item in items] == [1, 6, 8]
     assert items[0].umos == ["default:FriendMessage:1"]
     assert items[1].broadcast is True
@@ -173,7 +175,7 @@ def test_pull_cycle_delivers_and_acks():
         assert recorder.calls[0]["umos"] == ["default:FriendMessage:111"]
         assert recorder.calls[0]["title"] == "标题"
         assert recorder.calls[0]["content"] == "正文"
-        assert stub.acks == [{"results": [{"id": 11, "success": True}]}]
+        assert stub.acks == [{"results": [{"id": 11, "claimToken": CLAIM_TOKEN, "success": True}]}]
 
         # 令牌必须随出站请求发送，且不得外泄到其它头
         sent = {k.lower(): v for k, v in stub.headers[0].items()}
@@ -182,8 +184,8 @@ def test_pull_cycle_delivers_and_acks():
         stub.stop()
 
 
-def test_broadcast_item_uses_configured_groups_and_dedupes():
-    """广播条目投递到管理员配置的群目标，并与条目自带目标去重。"""
+def test_broadcast_item_uses_voicehub_targets_only():
+    """插件本机群列表不能扩大 VoiceHub 队列条目的投递目标。"""
     groups = ["default:GroupMessage:900", "default:GroupMessage:901"]
     stub = _StubVoiceHub([
         {"id": 21, "content": "全站广播", "umos": ["default:GroupMessage:900"], "broadcast": True},
@@ -194,10 +196,10 @@ def test_broadcast_item_uses_configured_groups_and_dedupes():
         client = VoiceHubPullClient(config, recorder, _NullLogger(), VoiceHubClient(config))
         asyncio.run(client.run_once())
 
-        assert recorder.calls[0]["umos"] == ["default:GroupMessage:900", "default:GroupMessage:901"]
-        assert stub.acks == [{"results": [{"id": 21, "success": True}]}]
+        assert recorder.calls[0]["umos"] == ["default:GroupMessage:900"]
+        assert stub.acks == [{"results": [{"id": 21, "claimToken": CLAIM_TOKEN, "success": True}]}]
         # 群目标投递前必须回查 VoiceHub 授权，而不是只信本地列表。
-        assert stub.verify_requests == [{"umos": groups}]
+        assert stub.verify_requests == [{"umos": ["default:GroupMessage:900"]}]
     finally:
         stub.stop()
 
@@ -272,17 +274,18 @@ def test_broadcast_without_group_targets_reports_failure_not_silence():
         stub.stop()
 
 
-def test_partial_failure_is_acked_success_to_avoid_duplicate_push():
-    """部分目标失败仍算投递完成，否则整条通知会被反复重投。"""
+def test_partial_failure_reports_failed_targets_for_retry():
+    """部分目标失败只重试失败目标。"""
     stub = _StubVoiceHub([
-        {"id": 41, "content": "部分失败", "umos": ["default:FriendMessage:411"]},
+        {"id": 41, "content": "部分失败", "umos": ["default:FriendMessage:411", "default:FriendMessage:412"]},
     ]).start()
     try:
-        recorder = _PushRecorder(sent=1, failed=[{"umo": "x", "reason": "boom"}])
+        recorder = _PushRecorder(sent=1, failed=[{"umo": "default:FriendMessage:412", "reason": "boom"}])
         client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
         asyncio.run(client.run_once())
 
-        assert stub.acks == [{"results": [{"id": 41, "success": True}]}]
+        assert stub.acks == [{"results": [{"id": 41, "claimToken": CLAIM_TOKEN, "success": False,
+                                      "failedUmos": ["default:FriendMessage:412"], "reason": "boom"}]}]
     finally:
         stub.stop()
 
