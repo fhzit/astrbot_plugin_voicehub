@@ -2,7 +2,7 @@ name: astrbot_plugin_voicehub
 display_name: VoiceHub 推送
 desc: 接收 VoiceHub 通知并推送到 QQ 官方机器人、OneBot v11、企业微信智能机器人、飞书、钉钉等适配器会话。
 short_desc: 把 VoiceHub 的点歌/排期/系统通知推送到聊天平台。
-version: v1.0.0
+version: v1.0.0.0
 author: fhzit
 repo: https://github.com/fhzit/astrbot_plugin_voicehub
 support_platforms:
