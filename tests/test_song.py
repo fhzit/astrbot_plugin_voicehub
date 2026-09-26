@@ -33,7 +33,7 @@ UMO = "aiocqhttp:FriendMessage:user1"
 GROUP = "123456789"
 
 TEXT_GROUP_ONLY = "为避免刷屏，请在机器人私聊中点歌。"
-TEXT_NO_SESSION = "请先用「/vh song 关键词」搜索歌曲。"
+TEXT_NO_SESSION = "请先用「/广播 点歌 关键词」搜索歌曲。"
 TEXT_COOLDOWN = "点歌太频繁，请稍后再试。"
 TEXT_NO_BASE_URL = "插件未配置 VoiceHub 站点地址，无法点歌。"
 TEXT_NETWORK = "无法连接 VoiceHub，请稍后重试。"
@@ -53,6 +53,7 @@ class _StubSongApi:
     def __init__(self):
         self.search_bodies = []
         self.request_bodies = []
+        self.paths = []
         self.headers = []
         self.search_status = 200
         self.search_response = {
@@ -102,6 +103,7 @@ class _StubSongApi:
 
             def do_GET(self):
                 outer.headers.append(dict(self.headers))
+                outer.paths.append(self.path)
                 if self.path.endswith("/play-times"):
                     self._send(outer.play_times_status, outer.play_times_response)
                     return
@@ -111,6 +113,7 @@ class _StubSongApi:
                 length = int(self.headers.get("content-length") or 0)
                 raw = self.rfile.read(length) if length else b"{}"
                 outer.headers.append(dict(self.headers))
+                outer.paths.append(self.path)
                 body = json.loads(raw or b"{}")
                 if self.path.endswith("/song-search"):
                     outer.search_bodies.append(body)
@@ -190,28 +193,41 @@ def _ok_song_request():
 
 
 # ----------------------------------------------------------------------
-# 1. 参数解析
+# 1. 参数解析（中文键名，英文旧键兼容）
 # ----------------------------------------------------------------------
 
 
-def test_parse_pick_args_accepts_index_time_and_card_in_any_order():
-    """`/vh pick 3 time=2 card=ABCD1234` 解析出序号、时段序号与券码。"""
-    args, error = parse_pick_args("3 time=2 card=ABCD1234")
+def test_parse_pick_args_accepts_chinese_keys_in_any_order():
+    """`/广播 选歌 3 时段=2 点歌券=ABCD1234` 解析出序号、时段序号与券码。"""
+    args, error = parse_pick_args("3 时段=2 点歌券=ABCD1234")
     assert error == ""
     assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234")
 
     # 键名顺序无关
-    args, error = parse_pick_args("/vh pick 3 card=ABCD1234 time=2")
+    args, error = parse_pick_args("3 点歌券=ABCD1234 时段=2")
     assert error == ""
     assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234")
 
     # 单独使用
     assert parse_pick_args("1")[0].play_time_index is None
-    assert parse_pick_args("2 card=abc")[0].card_code == "ABC"
-    assert parse_pick_args("vh pick 1 time=3")[0].play_time_index == 3
+    assert parse_pick_args("2 点歌券=abc")[0].card_code == "ABC"
+    assert parse_pick_args("1 时段=3")[0].play_time_index == 3
+    # 带上指令名本身也能解析
+    assert parse_pick_args("/广播 选歌 4 时段=1")[0].index == 4
 
 
-@pytest.mark.parametrize("text", ["abc", "0", "6", "-1", "3.5", "", "time=2"])
+def test_parse_pick_args_accepts_english_aliases():
+    """英文旧键 `time=` / `card=` 仍可解析（兼容旧写法）。"""
+    args, error = parse_pick_args("3 time=2 card=ABCD1234")
+    assert error == ""
+    assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234")
+
+    args, error = parse_pick_args("/vh pick 3 card=abcd1234 time=2")
+    assert error == ""
+    assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234")
+
+
+@pytest.mark.parametrize("text", ["abc", "0", "6", "-1", "3.5", "", "时段=2"])
 def test_parse_pick_args_rejects_bad_index(text):
     """非 1-5 整数序号的报错文案逐字。"""
     args, error = parse_pick_args(text)
@@ -236,7 +252,7 @@ def test_duration_and_platform_formatting():
 
 
 def test_render_song_list_is_verbatim():
-    """曲目列表逐字：标题行、编号行、结尾提示行。"""
+    """曲目列表逐字：标题行、编号行、结尾提示行（中文指令）。"""
     text = render_song_list("告白气球", "netease", [
         SongCandidate(index=1, title="告白气球", artist="周杰伦", duration_seconds=215),
         SongCandidate(index=2, title="无时长", artist="某人", duration_seconds=None),
@@ -245,12 +261,12 @@ def test_render_song_list_is_verbatim():
         "点歌搜索：告白气球（音源：网易云音乐）\n"
         "1. 告白气球 - 周杰伦（03:35）\n"
         "2. 无时长 - 某人（未知时长）\n"
-        "回复「/vh pick 序号」完成点歌。"
+        "回复「/广播 选歌 序号」完成点歌。"
     )
 
 
 def test_render_play_times_is_verbatim():
-    """播出时段列表逐字。"""
+    """播出时段列表逐字（结尾提示为中文指令）。"""
     text = render_play_times([
         PlayTime(id=1, name="午间广播", start_time="12:00", end_time="12:30"),
         PlayTime(id=2, name="晚间广播", start_time="18:00", end_time="18:30"),
@@ -259,7 +275,7 @@ def test_render_play_times_is_verbatim():
         "可选播出时段：\n"
         "1. 午间广播（12:00-12:30）\n"
         "2. 晚间广播（18:00-18:30）\n"
-        "回复「/vh pick 序号 time=时段序号」选择时段。"
+        "回复「/广播 选歌 序号 时段=时段序号」选择时段。"
     )
 
 
@@ -288,7 +304,7 @@ def test_group_chat_is_refused_for_song_and_pick():
         service = SongService(_config("http://stub.invalid"), client=client)
         assert await service.song(UMO, GROUP, "告白气球") == TEXT_GROUP_ONLY
         assert await service.pick(UMO, GROUP, "1") == TEXT_GROUP_ONLY
-        assert await service.song_time(UMO, GROUP) == TEXT_GROUP_ONLY
+        assert await service.song(UMO, GROUP, "时段") == TEXT_GROUP_ONLY
         assert client.search_calls == [] and client.request_calls == []
         assert client.play_time_calls == 0
 
@@ -344,7 +360,7 @@ def test_second_pick_within_five_seconds_is_cooled_down():
         assert await service.pick(UMO, "", "2") == TEXT_COOLDOWN
         assert len(client.request_calls) == 1
 
-        # 冷却只针对本会话；另一会话不受影响
+        # 冷却只针对本会话；另一会话没有待选状态
         assert await service.pick("aiocqhttp:FriendMessage:user2", "", "1") == TEXT_NO_SESSION
 
         clock[0] += 0.2  # 距上次投稿正好 5.1 秒
@@ -361,7 +377,7 @@ def test_unconfigured_site_url_replies_verbatim():
         service = SongService(_config(""), client=client)
         assert await service.song(UMO, "", "告白气球") == TEXT_NO_BASE_URL
         assert await service.pick(UMO, "", "1") == TEXT_NO_BASE_URL
-        assert await service.song_time(UMO, "") == TEXT_NO_BASE_URL
+        assert await service.song(UMO, "", "时段") == TEXT_NO_BASE_URL
         assert client.search_calls == [] and client.request_calls == []
 
     asyncio.run(run())
@@ -373,13 +389,12 @@ def test_play_time_listing_when_disabled_or_empty():
         disabled = _RecordingClient(play_times=types.SimpleNamespace(
             ok=True, message="", enabled=False, play_times=[]))
         service = SongService(_config("http://stub.invalid"), client=disabled)
-        assert await service.song_time(UMO, "") == TEXT_NO_PLAY_TIME
-        assert await service.song(UMO, "", "time") == TEXT_NO_PLAY_TIME
+        assert await service.song(UMO, "", "时段") == TEXT_NO_PLAY_TIME
 
         empty = _RecordingClient(play_times=types.SimpleNamespace(
             ok=True, message="", enabled=True, play_times=[]))
         service = SongService(_config("http://stub.invalid"), client=empty)
-        assert await service.song_time(UMO, "") == TEXT_NO_PLAY_TIME
+        assert await service.song(UMO, "", "时段") == TEXT_NO_PLAY_TIME
 
     asyncio.run(run())
 
@@ -399,6 +414,7 @@ def test_search_maps_response_and_sends_token_and_body():
         assert stub.search_bodies == [{
             "umo": UMO, "keyword": "告白气球", "platform": "netease", "page": 1,
         }]
+        assert stub.paths[0].endswith("/api/bot/voicehub/song-search")
         sent = {k.lower(): v for k, v in stub.headers[0].items()}
         assert sent.get("x-voicehub-token") == "t0ken"
 
@@ -425,7 +441,7 @@ def test_search_renders_full_flow_through_service():
             "1. 告白气球 - 周杰伦（03:35）\n"
             "2. 晴天 - 周杰伦（04:29）\n"
             "3. 无时长 - 某人（未知时长）\n"
-            "回复「/vh pick 序号」完成点歌。"
+            "回复「/广播 选歌 序号」完成点歌。"
         )
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
         assert stub.request_bodies == [{
@@ -436,7 +452,11 @@ def test_search_renders_full_flow_through_service():
 
 
 def test_request_body_carries_uppercased_card_time_and_note():
-    """投稿请求体：券码大写、preferredPlayTimeId 取时段、submissionNote 取 note。"""
+    """投稿请求体：券码大写、preferredPlayTimeId 取时段、note 取附言。
+
+    §3.1 逐字规定插件→VoiceHub 的字段名是 `note`，由站点映射为 `requestSongForUser`
+    的 `submissionNote`，因此这里断言线上字段名 `note`。
+    """
     stub = _StubSongApi().start()
     try:
         client = VoiceHubSongClient(_config(stub.base_url))
@@ -447,8 +467,9 @@ def test_request_body_carries_uppercased_card_time_and_note():
         assert outcome.ok is True
         assert stub.request_bodies == [{
             "umo": UMO, "sessionToken": "sealed-ticket-1", "index": 2,
-            "playTimeId": 2, "cardCode": "ABCD1234", "submissionNote": "送给三班的同学",
+            "playTimeId": 2, "cardCode": "ABCD1234", "note": "送给三班的同学",
         }]
+        assert stub.paths[-1].endswith("/api/bot/voicehub/song-request")
         assert outcome.message == "点歌成功：告白气球 - 周杰伦"
 
         # 可选字段缺省时不出现，避免把 null 传给站点
@@ -460,13 +481,28 @@ def test_request_body_carries_uppercased_card_time_and_note():
         stub.stop()
 
 
-def test_pick_maps_play_time_index_to_id_and_card_to_body():
-    """`time=2` 映射为第二个时段的真实 id；券码大写后进入请求体。"""
+def test_pick_maps_chinese_keys_to_body():
+    """中文键 `时段=2`/`点歌券=` 映射为 playTimeId 与大写 cardCode。"""
     stub = _StubSongApi().start()
     try:
         service = SongService(_config(stub.base_url))
         asyncio.run(service.song(UMO, "", "告白气球"))
-        assert asyncio.run(service.pick(UMO, "", "2 time=2 card=abcd1234")) == "点歌成功：告白气球 - 周杰伦"
+        assert asyncio.run(
+            service.pick(UMO, "", "2 时段=2 点歌券=abcd1234")
+        ) == "点歌成功：告白气球 - 周杰伦"
+        body = stub.request_bodies[0]
+        assert (body["index"], body["playTimeId"], body["cardCode"]) == (2, 2, "ABCD1234")
+    finally:
+        stub.stop()
+
+
+def test_english_alias_keys_map_to_same_body():
+    """英文旧键与中文键映射出完全相同的请求体。"""
+    stub = _StubSongApi().start()
+    try:
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球"))
+        asyncio.run(service.pick(UMO, "", "2 time=2 card=abcd1234"))
         body = stub.request_bodies[0]
         assert (body["index"], body["playTimeId"], body["cardCode"]) == (2, 2, "ABCD1234")
     finally:
@@ -483,25 +519,25 @@ def test_play_time_index_uses_real_ids_not_positions():
     try:
         service = SongService(_config(stub.base_url))
         asyncio.run(service.song(UMO, "", "告白气球"))
-        asyncio.run(service.pick(UMO, "", "1 time=2"))
+        asyncio.run(service.pick(UMO, "", "1 时段=2"))
         assert stub.request_bodies[0]["playTimeId"] == 9
     finally:
         stub.stop()
 
 
 def test_play_times_are_fetched_and_cached_in_session():
-    """时段列表按 /vh song time 拉取并缓存，供后续 time= 换算。"""
+    """`/广播 点歌 时段` 拉取并缓存时段，供后续 `时段=` 换算。"""
     stub = _StubSongApi().start()
     try:
         service = SongService(_config(stub.base_url))
-        assert asyncio.run(service.song_time(UMO, "")) == (
+        assert asyncio.run(service.song(UMO, "", "时段")) == (
             "可选播出时段：\n"
             "1. 午间广播（12:00-12:30）\n"
             "2. 晚间广播（18:00-18:30）\n"
-            "回复「/vh pick 序号 time=时段序号」选择时段。"
+            "回复「/广播 选歌 序号 时段=时段序号」选择时段。"
         )
         asyncio.run(service.song(UMO, "", "告白气球"))
-        asyncio.run(service.pick(UMO, "", "1 time=1"))
+        asyncio.run(service.pick(UMO, "", "1 时段=1"))
         assert stub.request_bodies[0]["playTimeId"] == 1
     finally:
         stub.stop()
@@ -540,8 +576,10 @@ def test_http_error_text_reaches_user_verbatim():
         stub.search_response = {"message": "该会话未绑定 VoiceHub 账号"}
         assert asyncio.run(service.song(UMO, "", "告白气球")) == "该会话未绑定 VoiceHub 账号"
 
+        # 恢复成功响应后再搜索，才能建立待选会话
         stub.search_status = 200
-        asyncio.run(service.song(UMO, "", "告白气球"))
+        stub.search_response = _StubSongApi().search_response
+        assert asyncio.run(service.song(UMO, "", "告白气球")).startswith("点歌搜索：告白气球")
         stub.request_status = 400
         stub.request_response = {"message": "点歌券无效或已使用"}
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌券无效或已使用"
@@ -607,7 +645,7 @@ def test_song_config_defaults_and_clamping():
 
 
 # ----------------------------------------------------------------------
-# 指令接线（不启动真实 AstrBot，仅验证事件参数传递）
+# 指令接线（不启动真实 AstrBot，仅验证事件参数传递与文案）
 # ----------------------------------------------------------------------
 
 
@@ -633,7 +671,7 @@ async def _collect(generator):
 
 
 def test_commands_pass_group_id_through_to_refusal(plugin):
-    """群聊中 /vh song 与 /vh pick 都逐字拒绝。"""
+    """群聊中 `/广播 点歌` 与 `/广播 选歌` 都逐字拒绝。"""
     async def run():
         p = plugin.VoiceHubPlugin(types.SimpleNamespace(), {
             "webhook_token": "secret", "voicehub_base_url": "http://stub.invalid",
@@ -651,6 +689,6 @@ def test_song_command_reports_unconfigured_site(plugin):
         p = plugin.VoiceHubPlugin(types.SimpleNamespace(), {"webhook_token": "secret"})
         assert (await _collect(p.vh_song(FakeEvent(), "告白气球")))[0] == TEXT_NO_BASE_URL
         assert (await _collect(p.vh_pick(FakeEvent(), "1")))[0] == TEXT_NO_BASE_URL
-        assert (await _collect(p.vh_song(FakeEvent(), "time")))[0] == TEXT_NO_BASE_URL
+        assert (await _collect(p.vh_song(FakeEvent(), "时段")))[0] == TEXT_NO_BASE_URL
 
     asyncio.run(run())

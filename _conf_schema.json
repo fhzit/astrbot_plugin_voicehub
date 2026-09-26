@@ -64,12 +64,24 @@
     "description": "群广播会话（可选）",
     "type": "text",
     "default": "",
-    "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /vh status 取整串。形状不合法的条目会在启动时被忽略并记录日志。"
+    "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /广播 状态 取整串。形状不合法的条目会在启动时被忽略并记录日志。"
   },
 
   "request_timeout_seconds": {
     "description": "回调 VoiceHub 超时(秒)",
     "type": "int",
     "default": 15
+  },
+  "song_enabled": {
+    "description": "启用点歌指令",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后 /广播 点歌 与 /广播 选歌 直接回复「点歌功能未启用。」。点歌仅在机器人私聊可用。"
+  },
+  "song_result_count": {
+    "description": "点歌搜索结果条数（上限 5）",
+    "type": "int",
+    "default": 5,
+    "hint": "每次搜索展示的候选条数，默认 5，最多 5（超出按 5 处理，小于 1 按 1 处理）。"
   }
 }
