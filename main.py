@@ -224,7 +224,7 @@ class VoiceHubPlugin(Star):
             logger.info("[VoiceHub] 首次使用排期图片功能，正在下载字体（约 16 MB），请稍候……")
 
         try:
-            fonts = await ensure_fonts(font_dir)
+            fonts = await ensure_fonts(font_dir, logger)
         except Exception as exc:  # noqa: BLE001
             yield event.plain_result(f"字体下载失败，无法生成排期图片：{exc}")
             return

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
+from typing import Any
 
 import aiohttp
-
-logger = logging.getLogger(__name__)
 
 FONT_URLS: dict[str, str] = {
     "regular": "https://cdn.jsdelivr.net/npm/@fontpkg/harmony-os-sans-sc@1.0.3/HarmonyOS_Sans_SC_Regular.ttf",
@@ -20,7 +18,7 @@ FONT_FILES: dict[str, str] = {
 }
 
 
-async def _download(url: str, dest: Path, label: str) -> None:
+async def _download(url: str, dest: Path, label: str, logger: Any) -> None:
     """下载单个字体文件到 dest，带进度日志。"""
     logger.info("[VoiceHub] 正在下载字体 %s → %s", label, dest.name)
     timeout = aiohttp.ClientTimeout(total=120)
@@ -51,11 +49,12 @@ def fonts_already_exist(font_dir: Path) -> bool:
     return all((font_dir / filename).exists() for filename in FONT_FILES.values())
 
 
-async def ensure_fonts(font_dir: Path) -> dict[str, Path]:
+async def ensure_fonts(font_dir: Path, logger: Any) -> dict[str, Path]:
     """确保两个字体文件存在，首次运行时从 CDN 下载。
 
     Args:
         font_dir: 字体保存目录（不存在时自动创建）。
+        logger: 日志记录器（由调用方注入，通常为 ``astrbot.api.logger``）。
 
     Returns:
         ``{"regular": Path, "bold": Path}``，指向本地 .ttf 文件。
@@ -68,5 +67,5 @@ async def ensure_fonts(font_dir: Path) -> dict[str, Path]:
         if dest.exists():
             logger.debug("[VoiceHub] 字体已存在，跳过下载：%s", dest)
         else:
-            await _download(FONT_URLS[key], dest, key)
+            await _download(FONT_URLS[key], dest, key, logger)
     return result

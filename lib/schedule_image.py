@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import logging
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path
@@ -12,8 +11,6 @@ from typing import Any
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
-
-logger = logging.getLogger(__name__)
 
 # ── 画布参数 ────────────────────────────────────────────────
 IMG_W        = 800
