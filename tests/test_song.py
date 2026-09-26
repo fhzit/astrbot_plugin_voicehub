@@ -644,6 +644,18 @@ def test_song_config_defaults_and_clamping():
     assert VoiceHubConfig.from_mapping({"song_result_count": "abc"}).song_result_count == 5
 
 
+def test_disabled_song_feature_replies_without_calling_upstream():
+    """song_enabled 关闭时不发起请求，直接回复未启用。"""
+    async def run():
+        client = _RecordingClient(search=_search_outcome(), request=_ok_song_request())
+        service = SongService(_config("http://stub.invalid", song_enabled=False), client=client)
+        assert await service.song(UMO, "", "告白气球") == "点歌功能未启用。"
+        assert await service.pick(UMO, "", "1") == "点歌功能未启用。"
+        assert client.search_calls == [] and client.request_calls == []
+
+    asyncio.run(run())
+
+
 # ----------------------------------------------------------------------
 # 指令接线（不启动真实 AstrBot，仅验证事件参数传递与文案）
 # ----------------------------------------------------------------------
