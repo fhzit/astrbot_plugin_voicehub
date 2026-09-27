@@ -67,10 +67,10 @@
     "hint": "逗号或换行分隔的 unified_msg_origin，必须是「平台实例ID:GroupMessage:会话ID」，例如 default:GroupMessage:123456789。前缀是平台实例 ID（默认常为 default），不是适配器名；请在目标群里发送 /广播 状态 取整串。群目标的正式白名单在 VoiceHub 后台配置（含平台归属），这里留空即可；填写后仅作为第二道闸门，只允许其中的群被推送。形状不合法的条目会在启动时被忽略并记录日志。"
   },
   "verify_cache_seconds": {
-    "description": "目标授权回查缓存（秒）",
+    "description": "目标授权失败缓存（秒）",
     "type": "int",
     "default": 30,
-    "hint": "插件投递前会向 VoiceHub 回查目标是否获授权，回查结果缓存此时长以减少请求量。填 0 表示每次都回查。授权被撤销后最多延迟该时长生效。"
+    "hint": "成功授权每次投递前实时回查；仅失败结果缓存此时长。填 0 表示失败也不缓存。重新授权后可能需等待失败缓存过期。"
   },
 
   "request_timeout_seconds": {

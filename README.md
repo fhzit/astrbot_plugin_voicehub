@@ -127,7 +127,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `voicehub_token`：回查 VoiceHub 用的令牌，留空复用 `webhook_token`（一般无需单独填写）。
 - `pull_interval_seconds`：**拉取模式**开关，默认 `0`（关闭）。填大于 0 的值（建议 15–60）即启用，见下节。
 - `group_umos`：本机附加群白名单（可选），见下节。
-- `verify_cache_seconds`：群目标授权回查结果的缓存秒数，默认 30，填 `0` 表示每次投递都回查。
+- `verify_cache_seconds`：目标授权**失败结果**的缓存秒数，默认 30；成功授权每次投递前都会实时回查。填 `0` 表示失败也不缓存；重新授权后可能需等待失败缓存过期。
 - `request_timeout_seconds`：回调 VoiceHub 的超时，默认 15 秒。
 - `song_enabled`：默认开启。关闭后 `/广播 点歌` 与 `/广播 选歌` 回复「点歌功能未启用。」。
 - `song_result_count`：点歌搜索展示的候选条数，默认 5，**上限 5**（超出按 5 处理）。

@@ -26,7 +26,7 @@ class VoiceHubClient:
 
     def __init__(self, config: VoiceHubConfig):
         self.config = config
-        # 目标授权回查的短期缓存：键为目标集合，值为 (过期时刻, 是否授权)。
+        # 仅缓存拒绝结果；成功授权必须每次投递前实时回查。
         self._verify_cache: dict = {}
 
     async def _post(self, path: str, payload: dict) -> BindResult:
@@ -130,8 +130,6 @@ class VoiceHubClient:
         if not umos or not self.config.voicehub_base_url or not self.config.voicehub_token:
             return False
         if self.config.verify_cache_seconds > 0:
-            # 同一批目标在短时间内可能被 push 与 pull 两条路径分别确认，
-            # 缓存只用于削峰；缓存项都带短 TTL，因此撤销授权最多延迟一个 TTL。
             cached = self._verify_cache.get(self._cache_key(umos))
             if cached is not None and cached[0] > time.monotonic():
                 return cached[1]
@@ -155,8 +153,11 @@ class VoiceHubClient:
                                        and set(verified) == set(umos))
         except Exception:  # noqa: BLE001 - network/timeout/invalid upstream response fails closed
             verified_ok = False
-        if self.config.verify_cache_seconds > 0:
-            self._verify_cache[self._cache_key(umos)] = (time.monotonic() + self.config.verify_cache_seconds, verified_ok)
+        key = self._cache_key(umos)
+        if not verified_ok and self.config.verify_cache_seconds > 0:
+            self._verify_cache[key] = (time.monotonic() + self.config.verify_cache_seconds, False)
+        else:
+            self._verify_cache.pop(key, None)
         return verified_ok
 
     def _cache_key(self, umos: list[str]) -> tuple:

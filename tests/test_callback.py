@@ -92,3 +92,35 @@ def test_target_lookup_requires_exact_verified_list_and_refuses_redirect():
         finally:
             await runner.cleanup()
     asyncio.run(run())
+
+
+def test_revoked_target_must_not_reuse_positive_authorization():
+    async def run():
+        allowed = True
+        requests = []
+        async def verify(request):
+            requests.append((await request.json())["umos"])
+            return web.json_response({"success": True, "umos": requests[-1]}) if allowed else web.json_response(
+                {"success": False}, status=403)
+        app = web.Application()
+        app.router.add_post("/api/bot/voicehub/verify-targets", verify)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            client = VoiceHubClient(VoiceHubConfig.from_mapping({
+                "webhook_token": "secret", "voicehub_base_url": f"http://127.0.0.1:{port}",
+                "verify_cache_seconds": 30}))
+            group = ["bot:GroupMessage:1"]
+            private = ["bot:FriendMessage:2"]
+            assert await client.verify_group_targets(group)
+            assert await client.verify_private_targets(private)
+            allowed = False
+            assert not await client.verify_group_targets(group)
+            assert not await client.verify_private_targets(private)
+            assert len(requests) == 4
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
