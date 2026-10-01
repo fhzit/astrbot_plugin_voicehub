@@ -281,6 +281,53 @@ def test_show_logo_toggles_header_logo():
     assert without.height <= withlogo.height
 
 
+def test_header_shows_site_title_top_left_beside_logo():
+    """站点标题应像打印排期一样显示在图片左上角，并与 Logo 同排。"""
+    from astrbot_plugin_voicehub.lib import schedule_image as si
+
+    data = _make_data()
+    data["siteTitle"] = "校广播站"
+    img = _render(data)
+
+    # 标题与 Logo 处于同一水平带：标题基线应落在 Logo 占据的纵向范围内
+    assert si.LOGO_SIZE > 0
+    title_y = si._header_title_top(True if data["imageConfig"]["siteLogoUrl"] else False)
+    assert 0 <= title_y < si.LOGO_SIZE + si.PAD_V, "标题应与 Logo 同排，而不是压在 Logo 上方或下方"
+
+
+def test_header_site_title_falls_back_when_missing():
+    """站点标题缺失时回退 VoiceHub，且不得影响出图。"""
+    from astrbot_plugin_voicehub.lib.schedule_image import resolve_site_title
+
+    assert resolve_site_title({"siteTitle": "  "}) == "VoiceHub"
+    assert resolve_site_title({}) == "VoiceHub"
+    assert resolve_site_title({"siteTitle": "校园广播站"}) == "校园广播站"
+    assert resolve_site_title({"imageConfig": {"siteTitle": "后台标题"}}) == "后台标题"
+
+
+def test_header_without_logo_still_places_title_top_left():
+    """关闭 Logo 时标题仍占据左上角，不留空位。"""
+    from astrbot_plugin_voicehub.lib import schedule_image as si
+
+    data = _make_data(showLogo=False)
+    data["imageConfig"]["showLogo"] = False
+    data["imageConfig"]["siteLogoUrl"] = ""
+    img = _render(data)
+    assert img.width == 800
+    assert si._header_title_top(False) == si.PAD_V
+
+
+def test_table_layout_also_shows_site_title():
+    """表格排版同样在左上角展示站点标题。"""
+    from astrbot_plugin_voicehub.lib import schedule_image as si
+
+    data = _make_data(layout="table")
+    data["siteTitle"] = "校广播站"
+    img = _render(data)
+    assert img.width == 800
+    assert si.resolve_site_title(data) == "校广播站"
+
+
 def test_missing_display_config_falls_back_to_defaults():
     """displayConfig 缺失时按默认值渲染，不得抛异常。"""
     data = _make_data()

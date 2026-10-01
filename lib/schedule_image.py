@@ -190,6 +190,21 @@ def _absolute_url(url: str, base_url: str) -> str:
         return url
 
 
+def resolve_site_title(data: Any) -> str:
+    """取站点标题：优先响应顶层 ``siteTitle``，回退 ``imageConfig.siteTitle``，最后 VoiceHub。
+
+    与打印排期的 ``siteTitle`` 同源（systemSettings.siteTitle），缺失或空白时用
+    默认站点名，避免左上角出现空白标题。
+    """
+    source = data if isinstance(data, dict) else {}
+    for candidate in (source.get("siteTitle"), (source.get("imageConfig") or {}).get("siteTitle")
+                      if isinstance(source.get("imageConfig"), dict) else None):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return "VoiceHub"
+
+
 def logo_slots(display: dict[str, Any], image_config: Any, base_url: str = "") -> list[tuple[str, str]]:
     """返回需要下载的 Logo 槽位 ``[(kind, url), ...]``。
 
@@ -293,15 +308,19 @@ def _requester_text(song: dict) -> str:
 # 头部与页脚
 # ──────────────────────────────────────────────────────────────
 
+def _header_title_top(has_logo: bool) -> int:
+    """站点标题的纵向起点。
+
+    有 Logo 时与 Logo 同排（对齐到 Logo 带顶部），无 Logo 时贴头部留白，
+    两种情况标题都落在左上角，与打印排期的页头一致。
+    """
+    return PAD_V + 2 if has_logo else PAD_V
+
+
 def _header_height(has_logo: bool, has_week_range: bool) -> int:
-    height = PAD_V
-    if has_logo:
-        height += LOGO_SIZE + LOGO_GAP
-    height += 28 + 6
-    if has_week_range:
-        height += 20
-    height += PAD_V // 2
-    return height + 10  # 分割线后留白
+    block_h = FS_TITLE + 4 + (20 if has_week_range else 0)
+    row_h = max(LOGO_SIZE, block_h) if has_logo else block_h
+    return PAD_V + row_h + PAD_V // 2 + 10  # 分割线后留白
 
 
 def _draw_header(
@@ -313,25 +332,37 @@ def _draw_header(
     logos: dict[str, Image.Image | None],
     slots: list[tuple[str, str]],
 ) -> int:
-    """绘制头部（Logo、站点名、周范围、分割线），返回正文起始 y。"""
+    """绘制头部（Logo、站点标题、周范围、分割线），返回正文起始 y。
+
+    版式对齐打印排期页头：左上角依次是站点 Logo、竖线、学校 Logo、标题块，
+    标题块第一行是站点标题，第二行是周范围；关闭 Logo 时标题仍占据左上角。
+    """
     R = fonts["regular"]
     B = fonts["bold"]
-    y = PAD_V
+    top = PAD_V
+    block_h = FS_TITLE + 4 + (20 if week_range else 0)
+    row_h = max(LOGO_SIZE, block_h) if slots else block_h
 
+    x = PAD_H
     if slots:
         for index, (kind, _url) in enumerate(slots):
-            logo_x = PAD_H if index == 0 else IMG_W - PAD_H - LOGO_SIZE
-            _paste_image(img, logos.get(kind), logo_x, y, LOGO_SIZE, COVER_RADIUS)
-        y += LOGO_SIZE + LOGO_GAP
+            if index:
+                x += 8
+            _paste_image(img, logos.get(kind), x, top, LOGO_SIZE, COVER_RADIUS)
+            x += LOGO_SIZE
+        x += 12
+        # 竖线分隔（与打印排期的 logo-divider 一致）
+        draw.line([(x, top + 6), (x, top + row_h - 6)], fill=C_DIVIDER, width=2)
+        x += 12
 
-    draw.text((PAD_H, y), site_title, font=B[FS_TITLE], fill=C_SONG)
-    y += 28 + 6
+    y = _header_title_top(bool(slots))
+    draw.text((x, y), site_title, font=B[FS_TITLE], fill=C_SONG)
+    y += FS_TITLE + 4
 
     if week_range:
-        draw.text((PAD_H, y), week_range, font=R[FS_SUBTITLE], fill=C_SUB)
-        y += 20
+        draw.text((x, y), week_range, font=R[FS_SUBTITLE], fill=C_SUB)
 
-    y += PAD_V // 2
+    y = top + row_h + PAD_V // 2
     draw.line([(PAD_H, y), (IMG_W - PAD_H, y)], fill=C_DIVIDER, width=2)
     y += 10
     return y
@@ -644,7 +675,7 @@ def _draw_image(
     schedules: list[dict] = data.get("schedules") or []
     display = normalize_display_config(data.get("displayConfig"))
 
-    site_title = str(data.get("siteTitle") or "VoiceHub")
+    site_title = resolve_site_title(data)
     week_range = str(data.get("weekRange") or "")
 
     fonts = _load_fonts(font_dir)
