@@ -53,16 +53,26 @@ TEXT_INDEX_INVALID = "序号必须是 1-5 之间的整数。"
 # `/广播 选歌` 的参数键名（中文为主，英文旧键仅作兼容别名）
 PICK_PLAY_TIME_KEYS = frozenset({"时段", "time"})
 PICK_CARD_KEYS = frozenset({"点歌券", "card"})
+PICK_NOTE_KEYS = frozenset({"备注", "note", "留言"})
+
+# 参数长度上限（与站点同源：RequestForm.vue 的 textarea maxlength 与
+# songRequestService 的 zod max 都是 300）
+MAX_KEYWORD_LENGTH = 100
+MAX_CARD_LENGTH = 100
+MAX_NOTE_LENGTH = 300
 
 # 以下几条为规格未覆盖处的补充文案（见 README「点歌」一节）
 TEXT_SONG_DISABLED = "点歌功能未启用。"
 TEXT_USAGE_SONG = "用法：/广播 点歌 <关键词>（发送 /广播 点歌 时段 查看播出时段）。"
-TEXT_USAGE_PICK = "用法：/广播 选歌 <序号>。"
-TEXT_PICK_INVALID = "点歌参数不正确。用法：/广播 选歌 <序号> [时段=时段序号] [点歌券=券码]。"
+TEXT_USAGE_PICK = "用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
+TEXT_PICK_INVALID = (
+    "点歌参数不正确。用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；"
+    "参数以 - 开头，顺序无关。"
+)
+TEXT_PLAY_TIME_INVALID = "时段序号必须是 1-5 之间的整数。"
+TEXT_NOTE_EMPTY = "留言不能为空。"
+TEXT_NOTE_TOO_LONG = f"留言不能超过 {MAX_NOTE_LENGTH} 个字符。"
 TEXT_PLAY_TIME_MISSING = "找不到该播出时段，请先发送「/广播 点歌 时段」查看。"
-
-MAX_KEYWORD_LENGTH = 100
-MAX_CARD_LENGTH = 100
 
 
 @dataclass
@@ -118,11 +128,12 @@ class PlayTimeOutcome:
 
 @dataclass
 class PickArgs:
-    """`/vh pick` 的解析结果。"""
+    """`/广播 选歌` 的解析结果。"""
 
     index: int
     play_time_index: Optional[int] = None
     card_code: Optional[str] = None
+    note: Optional[str] = None
 
 
 @dataclass
@@ -182,16 +193,16 @@ def render_song_list(keyword: str, platform: str, candidates: List[SongCandidate
             f"{candidate.index}. {candidate.title} - {candidate.artist}"
             f"（{format_duration(candidate.duration_seconds)}）"
         )
-    lines.append("回复「/广播 选歌 序号」完成点歌。")
+    lines.append("回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。")
     return "\n".join(lines)
 
 
 def render_play_times(play_times: List[PlayTime]) -> str:
-    """渲染播出时段列表（编号即 `/广播 选歌 序号 时段=N` 里的 N）。"""
+    """渲染播出时段列表（编号即 `/广播 选歌 序号 -时段 N` 里的 N）。"""
     lines = ["可选播出时段："]
     for number, play_time in enumerate(play_times, start=1):
         lines.append(f"{number}. {play_time.name}（{_format_range(play_time)}）")
-    lines.append("回复「/广播 选歌 序号 时段=时段序号」选择时段。")
+    lines.append("回复「/广播 选歌 序号 -时段 时段序号」选择时段。")
     return "\n".join(lines)
 
 
@@ -204,11 +215,57 @@ def _format_range(play_time: PlayTime) -> str:
     return start or end
 
 
+def _strip_flag_prefix(token: str) -> Optional[str]:
+    """剥掉 JVM 风格前缀，返回键名；不是参数形式的 token 返回 None。
+
+    `-时段` / `--时段` 等价（JVM 的短/长前缀），`-` 与 `--` 本身不算键名。
+    `-` 形式不接受 `=`（见 `_parse_flag` 的说明）。
+    """
+    for prefix in ("--", "-"):
+        if token.startswith(prefix):
+            key = token[len(prefix):].strip()
+            return key.lower() if key and "=" not in key else None
+    return None
+
+
+def _is_flag(token: str) -> bool:
+    """该 token 是否以 `-` 开头（用于判断留言文本何时结束）。"""
+    return token.startswith("-")
+
+
+def _parse_flag(
+    tokens: List[str], start: int
+) -> Tuple[Optional[str], Optional[str], int, str]:
+    """解析一条 `-键 值` 参数，返回 `(键, 值, 下一个下标, 错误文案)`。
+
+    留言（`-备注`）是自由文本：值一直取到下一个 `-` 参数或串尾，因此可以含空格。
+    其余参数只接受紧邻的一个值。`-` 与 `--` 前缀等价。
+    """
+    key = _strip_flag_prefix(tokens[start])
+    if key is None:
+        return None, None, start, TEXT_PICK_INVALID
+    if key in PICK_NOTE_KEYS:
+        values: List[str] = []
+        cursor = start + 1
+        while cursor < len(tokens) and not _is_flag(tokens[cursor]):
+            values.append(tokens[cursor])
+            cursor += 1
+        return key, " ".join(values).strip(), cursor, ""
+    if start + 1 >= len(tokens):
+        return None, None, start, TEXT_PICK_INVALID
+    return key, tokens[start + 1].strip(), start + 2, ""
+
+
 def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
     """解析 `/广播 选歌` 的参数。
 
-    参数键名以中文为准（`时段=` 播出时段序号、`点歌券=` 券码），同时兼容英文旧键
-    `time=` / `card=`。两键可任意顺序出现。
+    参数以 `-` 开头（JVM 风格 `-键 值`，`--` 前缀等价），键名以中文为准：
+    `-时段` 播出时段序号、`-点歌券` 券码、`-备注` 留言；英文旧键 `-time` /
+    `-card` / `-note` 等价。参数可任意顺序出现。
+
+    `-备注` 是自由文本（可含空格），取值直到下一个 `-` 参数为止。
+
+    兼容旧写法：`时段=2` / `点歌券=X` / `备注=Y` 仍可解析，与 `-` 写法等价。
 
     Args:
         text: 指令参数原文，可含 `/广播 选歌` 或 `/vh pick` 前缀。
@@ -230,26 +287,50 @@ def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
 
     play_time_index: Optional[int] = None
     card_code: Optional[str] = None
-    for token in tokens[1:]:
-        if "=" not in token:
+    note: Optional[str] = None
+    seen: set = set()
+
+    cursor = 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        # 旧写法 `键=值` 仍兼容；其余一律按 `-键 值` 解析
+        if not _is_flag(token) and "=" in token:
+            key, _, value = token.partition("=")
+            key, value, cursor = key.strip().lower(), value.strip(), cursor + 1
+        else:
+            key, value, cursor, error = _parse_flag(tokens, cursor)
+            if error:
+                return None, error
+            if key is None:
+                return None, TEXT_PICK_INVALID
+
+        if key in seen:
             return None, TEXT_PICK_INVALID
-        key, _, value = token.partition("=")
-        key = key.strip().lower()
-        value = value.strip()
+        seen.add(key)
+
         if key in PICK_PLAY_TIME_KEYS:
             parsed = _parse_index(value)
             if parsed is None:
-                return None, TEXT_PICK_INVALID
+                return None, TEXT_PLAY_TIME_INVALID
             play_time_index = parsed
         elif key in PICK_CARD_KEYS:
             if not value or len(value) > MAX_CARD_LENGTH:
                 return None, TEXT_PICK_INVALID
             # 与站点 RequestForm 一致：券码统一大写后再提交
             card_code = value.upper()
+        elif key in PICK_NOTE_KEYS:
+            if not value:
+                return None, TEXT_NOTE_EMPTY
+            if len(value) > MAX_NOTE_LENGTH:
+                return None, TEXT_NOTE_TOO_LONG
+            note = value
         else:
             return None, TEXT_PICK_INVALID
 
-    return PickArgs(index=index, play_time_index=play_time_index, card_code=card_code), ""
+    return (
+        PickArgs(index=index, play_time_index=play_time_index, card_code=card_code, note=note),
+        "",
+    )
 
 
 def _parse_index(value: Any) -> Optional[int]:
@@ -603,7 +684,7 @@ class SongService:
         return render_play_times(outcome.play_times)
 
     async def pick(self, umo: str, group_id: str, raw_args: str) -> str:
-        """`/广播 选歌 <序号> [时段=时段序号] [点歌券=券码]`。"""
+        """`/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]`。"""
         refusal = self._guard(umo, group_id)
         if refusal:
             return refusal
@@ -634,6 +715,7 @@ class SongService:
             args.index,
             play_time_id=play_time_id,
             card_code=args.card_code,
+            note=args.note,
         ))
         if outcome is None:
             return TEXT_NETWORK

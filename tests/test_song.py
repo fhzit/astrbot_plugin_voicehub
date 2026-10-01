@@ -21,6 +21,10 @@ from astrbot_plugin_voicehub.lib.song import (
     SongCandidate,
     SongSearchOutcome,
     SongService,
+    TEXT_NOTE_EMPTY,
+    TEXT_NOTE_TOO_LONG,
+    TEXT_PICK_INVALID,
+    TEXT_PLAY_TIME_INVALID,
     VoiceHubSongClient,
     format_duration,
     format_platform,
@@ -236,6 +240,95 @@ def test_parse_pick_args_rejects_bad_index(text):
 
 
 # ----------------------------------------------------------------------
+# 1b. JVM 风格参数（`-键 值`，顺序无关）
+# ----------------------------------------------------------------------
+
+
+def test_parse_pick_args_accepts_jvm_flags_in_any_order():
+    """`-时段 2 -点歌券 X` 形式：键顺序无关，带上指令名同样可解析。"""
+    for text in (
+        "3 -时段 2 -点歌券 ABCD1234",
+        "3 -点歌券 ABCD1234 -时段 2",
+        "3 -点歌券 abcd1234 -时段 2",
+        "/广播 选歌 3 -点歌券 abcd1234 -时段 2",
+        "/vh pick 3 -时段 2 -点歌券 abcd1234",
+    ):
+        args, error = parse_pick_args(text)
+        assert error == "", text
+        assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234"), text
+
+
+def test_parse_pick_args_accepts_long_dash_prefix():
+    """`--时段` 与 `-时段` 等价（JVM 的 `-`/`--` 两种前缀）。"""
+    args, error = parse_pick_args("2 --时段 1 --点歌券 abcd")
+    assert error == ""
+    assert (args.index, args.play_time_index, args.card_code) == (2, 1, "ABCD")
+
+
+def test_parse_pick_args_accepts_english_flag_keys():
+    """英文旧键 `-time` / `-card` 与中文键等价。"""
+    args, error = parse_pick_args("3 -card abcd1234 -time 2")
+    assert error == ""
+    assert (args.index, args.play_time_index, args.card_code) == (3, 2, "ABCD1234")
+
+
+def test_note_flag_is_carried_through():
+    """`-备注` 解析为留言，原样保留（不补空格、不改写）。"""
+    args, error = parse_pick_args("1 -备注 生日快乐")
+    assert error == ""
+    assert args.note == "生日快乐"
+    assert parse_pick_args("1")[0].note is None
+
+
+def test_note_flag_takes_free_text_until_next_flag():
+    """留言是自由文本：可含空格，遇到下一个 `-` 参数才结束，与顺序无关。"""
+    args, error = parse_pick_args("1 -备注 生日快乐 记得播 -点歌券 abcd")
+    assert error == ""
+    assert (args.note, args.card_code) == ("生日快乐 记得播", "ABCD")
+
+    args, error = parse_pick_args("1 -点歌券 abcd -备注 送给 高三 的 学长")
+    assert error == ""
+    assert (args.note, args.card_code) == ("送给 高三 的 学长", "ABCD")
+
+
+def test_parse_pick_args_keeps_legacy_equals_form():
+    """旧写法 `时段=2 点歌券=X 备注=Y` 仍可解析，与新写法等价（兼容别名）。"""
+    legacy, error = parse_pick_args("3 时段=2 点歌券=abcd1234 备注=生日快乐")
+    assert error == ""
+    jvm, _ = parse_pick_args("3 -点歌券 abcd1234 -时段 2 -备注 生日快乐")
+    assert (legacy.index, legacy.play_time_index, legacy.card_code, legacy.note) == (
+        jvm.index, jvm.play_time_index, jvm.card_code, jvm.note
+    )
+
+
+def test_parse_pick_args_rejects_note_that_is_too_long():
+    """留言超过站点上限（300 字）时定点报错，不发请求。"""
+    args, error = parse_pick_args("1 -备注 " + "长" * 301)
+    assert args is None
+    assert error == TEXT_NOTE_TOO_LONG
+    assert parse_pick_args("1 -备注 " + "长" * 300)[0].note == "长" * 300
+
+
+@pytest.mark.parametrize("text, message", [
+    ("1 -备注", TEXT_NOTE_EMPTY),            # 参数缺值
+    ("1 -备注 -点歌券 abcd", TEXT_NOTE_EMPTY),  # 空留言（下一个参数紧跟）
+    ("1 -时段", TEXT_PICK_INVALID),           # 参数缺值
+    ("1 -时段 abc", TEXT_PLAY_TIME_INVALID),
+    ("1 -点歌券", TEXT_PICK_INVALID),
+    ("1 -未知 x", TEXT_PICK_INVALID),         # 未知参数
+    ("1 -时段 2 -时段 3", TEXT_PICK_INVALID), # 重复参数
+    ("1 生日快乐", TEXT_PICK_INVALID),         # 裸位置参数
+    ("1 -", TEXT_PICK_INVALID),               # 裸 `-`
+    ("1 --备注=x", TEXT_PICK_INVALID),         # `-` 形式不接受 `=`
+])
+def test_parse_pick_args_reports_specific_errors(text, message):
+    """缺值／未知／重复／裸位置参数各自给出定点文案，而不是笼统报错。"""
+    args, error = parse_pick_args(text)
+    assert args is None, text
+    assert error == message, text
+
+
+# ----------------------------------------------------------------------
 # 2/3. 渲染格式
 # ----------------------------------------------------------------------
 
@@ -261,7 +354,7 @@ def test_render_song_list_is_verbatim():
         "点歌搜索：告白气球（音源：网易云音乐）\n"
         "1. 告白气球 - 周杰伦（03:35）\n"
         "2. 无时长 - 某人（未知时长）\n"
-        "回复「/广播 选歌 序号」完成点歌。"
+        "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。"
     )
 
 
@@ -275,7 +368,7 @@ def test_render_play_times_is_verbatim():
         "可选播出时段：\n"
         "1. 午间广播（12:00-12:30）\n"
         "2. 晚间广播（18:00-18:30）\n"
-        "回复「/广播 选歌 序号 时段=时段序号」选择时段。"
+        "回复「/广播 选歌 序号 -时段 时段序号」选择时段。"
     )
 
 
@@ -441,7 +534,7 @@ def test_search_renders_full_flow_through_service():
             "1. 告白气球 - 周杰伦（03:35）\n"
             "2. 晴天 - 周杰伦（04:29）\n"
             "3. 无时长 - 某人（未知时长）\n"
-            "回复「/广播 选歌 序号」完成点歌。"
+            "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。"
         )
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
         assert stub.request_bodies == [{
@@ -534,7 +627,7 @@ def test_play_times_are_fetched_and_cached_in_session():
             "可选播出时段：\n"
             "1. 午间广播（12:00-12:30）\n"
             "2. 晚间广播（18:00-18:30）\n"
-            "回复「/广播 选歌 序号 时段=时段序号」选择时段。"
+            "回复「/广播 选歌 序号 -时段 时段序号」选择时段。"
         )
         asyncio.run(service.song(UMO, "", "告白气球"))
         asyncio.run(service.pick(UMO, "", "1 时段=1"))

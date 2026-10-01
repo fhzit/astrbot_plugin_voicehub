@@ -196,7 +196,7 @@ class VoiceHubPlugin(Star):
 
     @vh.command("选歌", alias={"pick"})
     async def vh_pick(self, event: AstrMessageEvent, args: GreedyStr):
-        """按序号投稿：/广播 选歌 <序号> [时段=时段序号] [点歌券=券码]"""
+        """按序号投稿：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]"""
         yield event.plain_result(await self.song_service.pick(
             event.unified_msg_origin, event.get_group_id(), args
         ))
