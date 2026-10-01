@@ -299,7 +299,11 @@ def _group_by_playtime(items: list[dict]) -> list[tuple[str, list[dict]]]:
 
 
 def _requester_text(song: dict) -> str:
-    """投稿人展示文本：年级 班级 姓名（缺项自动跳过）。"""
+    """投稿人展示文本：年级 班级 姓名（缺项自动跳过）。
+
+    服务端在 ``hideStudentInfo`` 开启（默认）时不再下发年级/班级，并会脱敏姓名；
+    这里对缺项与空值都只做跳过，不补任何占位。
+    """
     parts = [p for p in (song.get("requesterGrade", ""), song.get("requesterClass", ""), song.get("requester", "")) if p]
     return " ".join(parts)
 

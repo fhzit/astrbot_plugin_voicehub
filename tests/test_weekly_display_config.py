@@ -328,6 +328,15 @@ def test_table_layout_also_shows_site_title():
     assert si.resolve_site_title(data) == "校广播站"
 
 
+def test_requester_text_omits_missing_grade_and_class():
+    """服务端不下发年级/班级时，投稿人只显示姓名，不补占位符。"""
+    from astrbot_plugin_voicehub.lib.schedule_image import _requester_text
+
+    assert _requester_text({"requester": "张*"}) == "张*"
+    assert _requester_text({"requesterGrade": "", "requesterClass": "", "requester": "李*"}) == "李*"
+    assert _requester_text({"requesterGrade": "高一", "requesterClass": "2班", "requester": "王五"}) == "高一 2班 王五"
+
+
 def test_missing_display_config_falls_back_to_defaults():
     """displayConfig 缺失时按默认值渲染，不得抛异常。"""
     data = _make_data()
