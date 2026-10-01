@@ -201,15 +201,43 @@ class VoiceHubPlugin(Star):
             event.unified_msg_origin, event.get_group_id(), args
         ))
 
+    def _weekly_use_text(self, args: str) -> bool:
+        """判断本次本周歌单是否走纯文本。
+
+        优先级：本条指令参数（文本/text/txt）> 插件配置 weekly_output_mode。
+
+        Args:
+            args: 指令后的附加参数。
+
+        Returns:
+            True 表示请求 VoiceHub 的纯文本输出。
+        """
+        text = str(args or "").strip().lower()
+        if text in {"文本", "纯文本", "text", "txt"}:
+            return True
+        return self.plugin_config.weekly_output_mode == "text"
+
     @vh.command("本周歌单", alias={"weekly"})
-    async def vh_weekly(self, event: AstrMessageEvent):
-        """发送本周排期图片：/广播 本周歌单"""
+    async def vh_weekly(self, event: AstrMessageEvent, args: GreedyStr = ""):
+        """发送本周排期：/广播 本周歌单 [文本]
+
+        默认按 VoiceHub 后台的显示项出图；插件配置或本条指令加「文本」时，
+        直接发送 VoiceHub 生成的纯文本（适合刷屏少的场景与不支持图片的适配器）。
+        """
         if not self.plugin_config.song_enabled:
             yield event.plain_result("点歌功能未启用，请在插件配置中开启。")
             return
 
         if not self.plugin_config.voicehub_base_url:
             yield event.plain_result("插件未配置 VoiceHub 站点地址，无法获取排期。")
+            return
+
+        if self._weekly_use_text(args):
+            result = await self.voicehub_client.get_weekly_schedule_text()
+            if result.get("ok") is False:
+                yield event.plain_result(f"获取排期失败：{result.get('message', '未知错误')}")
+                return
+            yield event.plain_result(result.get("text", ""))
             return
 
         data = await self.voicehub_client.get_weekly_schedule()
@@ -230,7 +258,9 @@ class VoiceHubPlugin(Star):
             return
 
         try:
-            img_bytes = await generate_weekly_schedule_image(data, font_dir)
+            img_bytes = await generate_weekly_schedule_image(
+                data, font_dir, self.plugin_config.voicehub_base_url
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[VoiceHub] 生成排期图片失败: {exc}")
             yield event.plain_result(f"生成排期图片失败：{exc}")

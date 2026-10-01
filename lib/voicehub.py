@@ -171,12 +171,37 @@ class VoiceHubClient:
             VoiceHub 返回的排期 dict；网络异常或配置缺失时返回
             ``{"ok": False, "message": "..."}``.
         """
+        result = await self._get_weekly_schedule(None)
+        return result
+
+    async def get_weekly_schedule_text(self) -> dict:
+        """拉取 VoiceHub 直接生成的纯文本本周歌单。
+
+        VoiceHub 按站点后台的显示项生成文本（含站点名、日期范围、逐条歌单），
+        插件无需自行拼装，保证聊天里的文字与站点配置一致。
+
+        Returns:
+            成功时 ``{"ok": True, "text": "..."}``；失败时含 ``message``。
+        """
+        return await self._get_weekly_schedule("text")
+
+    async def _get_weekly_schedule(self, format_value: str | None) -> dict:
+        """拉取本周排期（结构化或纯文本）。
+
+        Args:
+            format_value: ``"text"`` 时请求纯文本，``None`` 时请求结构化 JSON。
+
+        Returns:
+            成功时返回 ``{"ok": True, ...}``；失败时返回 ``{"ok": False, "message": ...}``.
+        """
         if not self.config.voicehub_base_url:
             return {"ok": False, "message": "插件未配置 VoiceHub 站点地址"}
         if not self.config.voicehub_token:
             return {"ok": False, "message": "插件未配置 VoiceHub 令牌"}
 
         url = f"{self.config.voicehub_base_url}{WEEKLY_SCHEDULE_PATH}"
+        if format_value:
+            url = f"{url}?format={format_value}"
         headers = {TOKEN_HEADER: self.config.voicehub_token}
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
         try:
@@ -186,6 +211,15 @@ class VoiceHubClient:
                 ) as response:
                     if 300 <= response.status < 400:
                         return {"ok": False, "message": "VoiceHub 拒绝重定向"}
+                    if format_value:
+                        if response.status >= 400:
+                            body = await self._read_json(response)
+                            return {"ok": False, "message": self._error_message(body, response.status)}
+                        # 纯文本响应不是 JSON，直接读取正文
+                        text = (await response.text()).strip()
+                        if not text:
+                            return {"ok": False, "message": "VoiceHub 返回了空的本周歌单"}
+                        return {"ok": True, "text": text}
                     body = await self._read_json(response)
                     if response.status >= 400:
                         return {"ok": False, "message": self._error_message(body, response.status)}

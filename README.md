@@ -131,6 +131,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `request_timeout_seconds`：回调 VoiceHub 的超时，默认 15 秒。
 - `song_enabled`：默认开启。关闭后 `/广播 点歌` 与 `/广播 选歌` 回复「点歌功能未启用。」。
 - `song_result_count`：点歌搜索展示的候选条数，默认 5，**上限 5**（超出按 5 处理）。
+- `weekly_output_mode`：本周歌单输出形式，默认 `image`。`image` 按 VoiceHub 后台的显示项与排版配置出图；`text` 直接发送 VoiceHub 生成的纯文本。填其他值按 `image` 处理；单次强制文本可用 `/广播 本周歌单 文本`。
 
 首次生成歌单图片会自动下载 HarmonyOS Sans SC 字体到插件数据目录并缓存；若下载失败，指令会报错，请检查 AstrBot 出站网络后重试。无需额外部署浏览器或生图服务。
 
@@ -178,7 +179,7 @@ default:GroupMessage:123456789
 | `/广播 自检` | 向当前会话发送一条测试通知，不经过 VoiceHub。 |
 | `/广播 点歌 <关键词>` | 搜索歌曲并列出候选（见下节）。**仅私聊可用。** |
 | `/广播 选歌 <序号> [时段=<时段序号>] [点歌券=<券码>]` | 按序号投稿。**仅私聊可用。** |
-| `/广播 本周歌单` | 返回本周已发布排期的图片；图片字段由 VoiceHub 后台配置。 |
+| `/广播 本周歌单 [文本]` | 返回本周已发布排期；默认按 VoiceHub 后台配置出图，加「文本」则发送纯文本。 |
 
 **兼容旧写法**：英文旧名（`bind` / `unbind` / `status` / `test` / `song` / `pick` / `weekly`）只作为别名存在，例如 `/vh bind`；文档一律以中文指令为准。`/广播 选歌` 的参数键也兼容英文旧键 `time=` / `card=`。
 
@@ -226,7 +227,17 @@ default:GroupMessage:123456789
 
 发送 `/广播 本周歌单`，插件向 VoiceHub 查询**北京时间本周已发布**的排期（草稿不展示），并返回一张 PNG；没有排期时显示「本周暂无排期」。需要插件启用 `song_enabled`、填写 `voicehub_base_url`，以及配置与 VoiceHub 一致的访问令牌。首次调用会下载中文字体，此后复用缓存。
 
-管理员在 VoiceHub 后台 **机器人通知配置 → 本周歌单图片显示项** 勾选封面、序号、投稿人、票数、播出时段和日期后保存。设置对下一次查询生效；它不读取打印排期浏览器中的导出方案。
+管理员在 VoiceHub 后台 **机器人通知配置 → 本周歌单图片显示项** 配置后保存，插件出图时按该配置执行：
+
+- **图片排版**：`经典列表`（按日期与时段分组）或 `表格排版`（日期为列、序号为行，多时段时按播出时段分行）。
+- **列表列数**：经典列表下可选单列或双列；表格排版忽略此项。
+- **显示项**：站点 Logo、学校 Logo、封面、歌曲标题、歌手、投稿人、热度、序号、播出时段、日期。
+
+设置对下一次查询生效；它不读取打印排期浏览器中的导出方案。关闭站点/学校 Logo 时不占用头部位置。
+
+### 本周歌单纯文本
+
+把插件配置 `weekly_output_mode` 设为 `text`，或对单条指令使用 `/广播 本周歌单 文本`，插件会请求 VoiceHub 的纯文本输出（`format=text`）并直接发送。文本内容同样由后台显示项决定；适合刷屏敏感的场景与无法接收图片的适配器。
 
 ## HTTP 接口契约
 
@@ -315,9 +326,9 @@ uv pip install --python .venv/bin/python -r requirements.txt pytest pytest-async
 .venv/bin/python -m pytest tests -q
 ```
 
-测试不需要真实聊天平台：`tests/conftest.py` 在收集前注入最小 `astrbot.*` 桩模块，`tests/test_integration.py` 会同时启动桩 VoiceHub（实现 bind / unbind / verify-targets）与插件的入站服务，覆盖令牌校验、绑定往返、已绑定与未绑定私聊目标、显式群广播、缺失 `targets` 拒绝、回查重定向拒绝与令牌不外泄。
+测试不需要真实聊天平台：`tests/conftest.py` 在收集前注入最小 `astrbot.*` 桩模块，`tests/test_integration.py` 会同时启动桩 VoiceHub（实现 bind / unbind / verify-targets）与插件的入站服务，覆盖令牌校验、绑定往返、已绑定与未绑定私聊目标、显式群广播、缺失 `targets` 拒绝、回查重定向拒绝与令牌不外泄。`tests/test_schedule_image.py` 与 `tests/test_weekly_display_config.py` 覆盖本周歌单出图：排版样式（经典列表/表格排版）、列数、显示开关、Logo 槽位与纯文本取件。
 
-未覆盖：真实适配器的端到端送达、VoiceHub 侧的数据库查询。
+未覆盖：真实适配器的端到端送达、VoiceHub 侧的数据库查询、真实字体下的像素级观感（测试用 Pillow 默认字体代替）。
 
 ## 项目结构
 

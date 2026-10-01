@@ -89,5 +89,15 @@
     "type": "int",
     "default": 5,
     "hint": "每次搜索展示的候选条数，默认 5，最多 5（超出按 5 处理，小于 1 按 1 处理）。"
+  },
+  "weekly_output_mode": {
+    "description": "本周歌单输出形式",
+    "type": "string",
+    "default": "image",
+    "options": [
+      "image",
+      "text"
+    ],
+    "hint": "image=按 VoiceHub 后台「本周歌单显示项」生成图片（含排版样式、列数、站点/学校 Logo）；text=直接发送 VoiceHub 生成的纯文本。留空或其他取值按 image 处理。单次强制文本：/广播 本周歌单 文本"
   }
 }
