@@ -335,6 +335,80 @@ def test_delivery_failure_reports_reason_for_vh_retry():
         stub.stop()
 
 
+def test_redelivered_item_is_not_pushed_twice():
+    """投递成功后重新领取到同一条目：不再推送，直接回执成功。
+
+    回执丢失或插件重启后租约过期，VoiceHub 会重发同一条目；本地已投递缓存
+    保证 at-least-once 投递不变成用户可见的重复消息。
+    """
+    stub = _StubVoiceHub([
+        {"id": 71, "title": "标题", "content": "正文", "umos": ["default:FriendMessage:711"]},
+    ]).start()
+    try:
+        recorder = _PushRecorder()
+        client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
+
+        # 第一轮：正常投递并回执成功
+        assert asyncio.run(client.run_once()) == 1
+        assert len(recorder.calls) == 1
+        assert stub.acks == [{"results": [{"id": 71, "claimToken": CLAIM_TOKEN, "success": True}]}]
+
+        # 模拟回执丢失：VoiceHub 租约过期后重发同一条目（同 id，新 claimToken）
+        stub.items = [{**stub.items[0], "claimToken": "b" * 64}]
+        stub.acks.clear()
+        recorder.calls.clear()
+        assert asyncio.run(client.run_once()) == 1
+
+        # 关键断言：不得再次推送；直接以新的 claimToken 回执成功
+        assert recorder.calls == [], "重复领取的已投递条目不得再次推送"
+        assert stub.acks == [{"results": [{"id": 71, "claimToken": "b" * 64, "success": True}]}]
+    finally:
+        stub.stop()
+
+
+def test_dedup_cache_expires_and_allows_redelivery():
+    """已投递缓存过期后允许重新推送：缓存必须带 TTL，不能永久膨胀或永久拦截。"""
+    stub = _StubVoiceHub([
+        {"id": 72, "title": "标题", "content": "正文", "umos": ["default:FriendMessage:721"]},
+    ]).start()
+    try:
+        recorder = _PushRecorder()
+        client = VoiceHubPullClient(
+            _config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger(),
+            dedup_ttl_seconds=0.05,
+        )
+        assert asyncio.run(client.run_once()) == 1
+        stub.items = [{**stub.items[0], "claimToken": "c" * 64}]
+        import time as _time
+        _time.sleep(0.08)  # 超过 TTL，缓存应失效
+        assert asyncio.run(client.run_once()) == 1
+        assert len(recorder.calls) == 2, "TTL 过期后同 id 重新领取应允许再次推送"
+    finally:
+        stub.stop()
+
+
+def test_failed_delivery_is_not_cached_as_delivered():
+    """投递失败的条目不进缓存：租约过期重领后必须真正重试推送。"""
+    stub = _StubVoiceHub([
+        {"id": 73, "title": "标题", "content": "正文", "umos": ["default:FriendMessage:731"]},
+    ]).start()
+    stub.status = 200
+    try:
+        class _FailRecorder(_PushRecorder):
+            async def push_text(self, umos, title, content, url=None):
+                self.calls.append({"umos": list(umos), "title": title, "content": content, "url": url})
+                return type("R", (), {"sent": 0, "failed": [{"umo": umos[0], "reason": "x"}]})()
+
+        recorder = _FailRecorder()
+        client = VoiceHubPullClient(_config(f"http://127.0.0.1:{stub.port}"), recorder, _NullLogger())
+        assert asyncio.run(client.run_once()) == 1  # 失败回报
+        stub.items = [{**stub.items[0], "claimToken": "d" * 64}]
+        assert asyncio.run(client.run_once()) == 1
+        assert len(recorder.calls) == 2, "投递失败的条目重领后必须重试推送"
+    finally:
+        stub.stop()
+
+
 def test_redirect_on_pull_is_refused_and_token_not_forwarded():
     """取件遇 3xx 必须拒绝，绝不把令牌转发到重定向目的地。"""
     stub = _StubVoiceHub([]).start()

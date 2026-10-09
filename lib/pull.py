@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -94,13 +95,37 @@ def parse_pull_items(payload: Any) -> List[PullItem]:
 class VoiceHubPullClient:
     """轮询 VoiceHub 待投递队列的后台任务。"""
 
-    def __init__(self, config: VoiceHubConfig, push_service: Any, logger: Any, voicehub_client: Any = None):
+    # 已投递缓存 TTL：覆盖服务端全部重试窗口（3 次尝试 × 120 秒租约），
+    # 过期后允许重新推送，防止缓存无界膨胀或永久拦截合法重投。
+    DEDUP_TTL_SECONDS = 600.0
+
+    def __init__(self, config: VoiceHubConfig, push_service: Any, logger: Any, voicehub_client: Any = None,
+                 dedup_ttl_seconds: Optional[float] = None):
         self.config = config
         self.push_service = push_service
         self.logger = logger
         # 群目标授权由 VoiceHub 判定；未注入客户端时群投递会被拒绝（fail closed）。
         self.voicehub_client = voicehub_client
+        # 已投递条目缓存（id -> 时间戳）：回执丢失时服务端会重发同一条目，
+        # 命中缓存则直接回执成功、跳过推送，避免 at-least-once 变成重复消息。
+        ttl = self.DEDUP_TTL_SECONDS if dedup_ttl_seconds is None else dedup_ttl_seconds
+        self._dedup_ttl = ttl
+        self._delivered: Dict[int, float] = {}
         self._task: Optional[asyncio.Task] = None
+
+    def _is_delivered(self, item_id: int) -> bool:
+        """条目是否在 TTL 内已成功投递过；顺带清理过期记录。"""
+        deadline = self._delivered.get(item_id)
+        if deadline is None:
+            return False
+        if deadline < time.monotonic():
+            del self._delivered[item_id]
+            return False
+        return True
+
+    def _mark_delivered(self, item_id: int) -> None:
+        """记录投递成功时间，用于重领去重。"""
+        self._delivered[item_id] = time.monotonic() + self._dedup_ttl
 
     @property
     def enabled(self) -> bool:
@@ -172,6 +197,12 @@ class VoiceHubPullClient:
 
             results = []
             for item in items:
+                # 回执丢失导致服务端重发的已投递条目：跳过推送，直接按成功回执，
+                # 让服务端把这条标记为已投递，终止重试循环。
+                if self._is_delivered(item.id):
+                    self.logger.info(f"[VoiceHub] 通知 {item.id} 已投递过，跳过重复推送。")
+                    results.append({"id": item.id, "claimToken": item.claim_token, "success": True})
+                    continue
                 results.append(await self._deliver(session, headers, item))
             await self._ack(session, headers, results)
             return len(items)
@@ -239,6 +270,7 @@ class VoiceHubPullClient:
             if outcome.sent != len(deduped):
                 return {"id": item.id, "claimToken": item.claim_token, "success": False,
                         "reason": "目标结果不完整，需重试"}
+            self._mark_delivered(item.id)
             return {"id": item.id, "claimToken": item.claim_token, "success": True}
         except Exception as exc:  # noqa: BLE001 - 单条失败不得中断整批
             return {"id": item.id, "claimToken": item.claim_token, "success": False, "reason": str(exc)[:200]}
