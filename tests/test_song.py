@@ -148,13 +148,15 @@ class _StubSongApi:
 class _RecordingClient:
     """记录调用的桩客户端，供服务状态机测试使用（不发网络请求）。"""
 
-    def __init__(self, search=None, request=None, play_times=None):
+    def __init__(self, search=None, request=None, play_times=None, sources=None):
         self.search_calls = []
         self.request_calls = []
         self.play_time_calls = 0
+        self.sources_calls = 0
         self._search = search
         self._request = request
         self._play_times = play_times
+        self._sources = sources
 
     async def search(self, umo, keyword, platform="netease", page=1):
         self.search_calls.append({"umo": umo, "keyword": keyword, "platform": platform, "page": page})
@@ -170,6 +172,10 @@ class _RecordingClient:
     async def fetch_play_times(self):
         self.play_time_calls += 1
         return self._play_times
+
+    async def fetch_sources(self):
+        self.sources_calls += 1
+        return self._sources
 
 
 def _config(base_url="", **overrides):
@@ -354,7 +360,8 @@ def test_render_song_list_is_verbatim():
         "点歌搜索：告白气球（音源：网易云音乐）\n"
         "1. 告白气球 - 周杰伦（03:35）\n"
         "2. 无时长 - 某人（未知时长）\n"
-        "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。"
+        "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
+        "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
     )
 
 
@@ -534,7 +541,8 @@ def test_search_renders_full_flow_through_service():
             "1. 告白气球 - 周杰伦（03:35）\n"
             "2. 晴天 - 周杰伦（04:29）\n"
             "3. 无时长 - 某人（未知时长）\n"
-            "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。"
+            "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
+            "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
         )
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
         assert stub.request_bodies == [{

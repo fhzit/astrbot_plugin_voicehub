@@ -90,6 +90,12 @@
     "default": 5,
     "hint": "每次搜索展示的候选条数，默认 5，最多 5（超出按 5 处理，小于 1 按 1 处理）。"
   },
+  "share_link_auto_resolve": {
+    "description": "点歌自动解析分享链接",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，私聊里 /广播 点歌 的参数若是网易云音乐/QQ音乐/哔哩哔哩的分享链接（含 163cn.tv、b23.tv 短链），自动解析成单条候选，回复「/广播 选歌 1」完成点歌。仅影响私聊；默认关闭。"
+  },
   "weekly_output_mode": {
     "description": "本周歌单输出形式",
     "type": "string",

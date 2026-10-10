@@ -16,7 +16,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import aiohttp
 
 from .config import VoiceHubConfig
-from .contract import PLAY_TIMES_PATH, SONG_REQUEST_PATH, SONG_SEARCH_PATH, TOKEN_HEADER
+from .contract import (
+    PASSWORD_RESET_PATH,
+    PLAY_TIMES_PATH,
+    SONG_REQUEST_PATH,
+    SONG_RESOLVE_PATH,
+    SONG_SEARCH_PATH,
+    SONG_SOURCES_PATH,
+    TOKEN_HEADER,
+)
 
 # 会话有效期与投稿冷却（逐字要求：10 分钟 / 5 秒）
 SONG_SESSION_TTL_SECONDS = 600
@@ -54,6 +62,60 @@ TEXT_INDEX_INVALID = "序号必须是 1-5 之间的整数。"
 PICK_PLAY_TIME_KEYS = frozenset({"时段", "time"})
 PICK_CARD_KEYS = frozenset({"点歌券", "card"})
 PICK_NOTE_KEYS = frozenset({"备注", "note", "留言"})
+# 手动投稿：`-歌手` 键；`手动` 为选歌的保留字首参
+PICK_ARTIST_KEYS = frozenset({"歌手", "artist"})
+PICK_MANUAL_KEYWORD = "手动"
+
+# 平台名称词（大小写不敏感，lower 后匹配）：直接映射平台键
+PLATFORM_ALIASES: Dict[str, str] = {
+    "b站": "bilibili",
+    "bilibili": "bilibili",
+    "哔哩哔哩": "bilibili",
+    "哔站": "bilibili",
+    "网易云": "netease",
+    "网易云音乐": "netease",
+    "网易": "netease",
+    "ncm": "netease",
+    "netease": "netease",
+    "qq音乐": "tencent",
+    "qqyinyue": "tencent",
+    "qq": "tencent",
+    "tencent": "tencent",
+    "咪咕": "migu",
+    "咪咕音乐": "migu",
+    "migu": "migu",
+}
+
+# 点歌 `-平台` 参数键
+PICK_PLATFORM_KEYS = frozenset({"平台", "platform"})
+
+# 音源列表文案
+TEXT_PLATFORM_INVALID = "平台参数不正确：可用序号（站点启用顺序）或名称，如 B站、网易云、QQ音乐、咪咕。"
+
+# 分享链接解析文案
+TEXT_RESOLVE_OK_HINT = "回复「/广播 选歌 1」完成点歌（可选 -点歌券 券码、-备注 留言）。"
+TEXT_RESOLVE_UNRECOGNIZED = "无法识别的分享链接，支持网易云音乐、QQ音乐、哔哩哔哩；也可以用 /广播 点歌 关键词 搜索。"
+
+# 点歌地址文案
+TEXT_SITE_GROUP_ONLY = "为避免刷屏，请在机器人私聊中查询点歌地址。"
+TEXT_SITE_NO_BASE_URL = "插件未配置 VoiceHub 站点地址。"
+
+# 手动投稿文案
+TEXT_PICK_MANUAL_USAGE = (
+    "用法：/广播 选歌 手动 <歌名> -歌手 <歌手> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
+)
+TEXT_PICK_MANUAL_ARTIST_REQUIRED = "手动投稿需要歌手：在歌名后加 -歌手 歌手名。"
+
+# 重置密码文案
+TEXT_RESET_GROUP_ONLY = "为保护账号安全，重置密码仅在机器人私聊可用。"
+TEXT_RESET_USAGE = "用法：/广播 重置密码 <新密码>，随后 5 分钟内回复 /广播 重置密码 确认 <新密码>。"
+TEXT_RESET_CONFIRM_USAGE = (
+    "请回复：/广播 重置密码 确认 <新密码>（与第一步输入完全相同，5 分钟内有效）。"
+)
+TEXT_RESET_MISMATCH = "两次输入的新密码不一致，已取消本次重置；请重新发起：/广播 重置密码 <新密码>。"
+TEXT_RESET_CONFIRM_INVALID = "确认已过期或不正确，请重新发起：/广播 重置密码 <新密码>。"
+# 重置密码确认保留字
+RESET_CONFIRM_KEYWORDS = frozenset({"确认", "confirm"})
 
 # 参数长度上限（与站点同源：RequestForm.vue 的 textarea maxlength 与
 # songRequestService 的 zod max 都是 300）
@@ -63,8 +125,8 @@ MAX_NOTE_LENGTH = 300
 
 # 以下几条为规格未覆盖处的补充文案（见 README「点歌」一节）
 TEXT_SONG_DISABLED = "点歌功能未启用。"
-TEXT_USAGE_SONG = "用法：/广播 点歌 <关键词>（发送 /广播 点歌 时段 查看播出时段）。"
-TEXT_USAGE_PICK = "用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
+TEXT_USAGE_SONG = "用法：/广播 点歌 <关键词> [-平台 平台序号|名称]（发送 /广播 点歌 时段 查看播出时段）。"
+TEXT_USAGE_PICK = "用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/广播 选歌 手动 <歌名> -歌手 <歌手>。"
 TEXT_PICK_INVALID = (
     "点歌参数不正确。用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；"
     "参数以 - 开头，顺序无关。"
@@ -117,6 +179,35 @@ class SongRequestOutcome:
 
 
 @dataclass
+class SongSource:
+    """音源启用列表里的一项（index 即 `-平台 N` 引用的序号）。"""
+
+    index: int
+    key: str
+    name: str
+
+
+@dataclass
+class SongSourcesOutcome:
+    """音源启用列表查询结果。"""
+
+    ok: bool = False
+    message: str = ""
+    sources: List[SongSource] = field(default_factory=list)
+
+
+@dataclass
+class PasswordResetOutcome:
+    """重置密码调用结果。"""
+
+    ok: bool = False
+    message: str = ""
+    # init 步骤返回的确认令牌
+    pending_token: Optional[str] = None
+    expires_in_seconds: Optional[int] = None
+
+
+@dataclass
 class PlayTimeOutcome:
     """播出时段查询结果。"""
 
@@ -134,6 +225,8 @@ class PickArgs:
     play_time_index: Optional[int] = None
     card_code: Optional[str] = None
     note: Optional[str] = None
+    # 手动投稿模式：manual 不为 None 时走 song-request 的 manual 分支
+    manual: Optional[Dict[str, str]] = None
 
 
 @dataclass
@@ -194,6 +287,16 @@ def render_song_list(keyword: str, platform: str, candidates: List[SongCandidate
             f"（{format_duration(candidate.duration_seconds)}）"
         )
     lines.append("回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。")
+    lines.append("换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。")
+    return "\n".join(lines)
+
+
+def render_resolved_song(platform: str, candidate: SongCandidate) -> str:
+    """渲染分享链接解析结果（单条候选，确认序号固定为 1）。"""
+    lines = [f"已识别：{candidate.title} - {candidate.artist}（音源：{format_platform(platform)}）"]
+    if candidate.duration_seconds is not None:
+        lines.append(f"时长：{format_duration(candidate.duration_seconds)}")
+    lines.append(TEXT_RESOLVE_OK_HINT)
     return "\n".join(lines)
 
 
@@ -281,6 +384,10 @@ def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
     if not tokens:
         return None, TEXT_INDEX_INVALID
 
+    # 手动投稿模式：`选歌 手动 <歌名> -歌手 <歌手> [...]`
+    if tokens[0] == PICK_MANUAL_KEYWORD:
+        return _parse_manual_pick_args(tokens[1:])
+
     index = _parse_index(tokens[0])
     if index is None:
         return None, TEXT_INDEX_INVALID
@@ -342,6 +449,112 @@ def _parse_index(value: Any) -> Optional[int]:
     if number < 1 or number > MAX_RESULT_COUNT:
         return None
     return number
+
+
+def resolve_platform_argument(value: Any) -> Optional[str]:
+    """把 `-平台` 的取值解析为平台键：名称词优先（大小写不敏感）。
+
+    纯数字与未知取值返回 None：数字要走音源启用列表映射（依赖站点状态），
+    由 SongService.resolve_platform 处理；未知名称词直接给错误文案。
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    return PLATFORM_ALIASES.get(text)
+
+
+def looks_like_share_link(text: str) -> bool:
+    """参数是否像音乐分享链接（http(s) URL 或已知短链域名）。
+
+    判定刻意宽松：真正的平台识别由服务端 `song-resolve` 完成，
+    插件只决定「走解析还是走搜索」。
+    """
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if "http://" in value or "https://" in value:
+        return True
+    lowered = value.lower()
+    return any(host in lowered for host in ("163cn.tv", "b23.tv", "music.163.com", "y.qq.com", "bilibili.com"))
+
+
+def _parse_manual_pick_args(tokens: List[str]) -> Tuple[Optional[PickArgs], str]:
+    """解析 `选歌 手动 <歌名> -歌手 <歌手> [...]`（手动投稿）。
+
+    歌名是第一个非参数 token 到第一个 `-` 参数之间的文本（可含空格）；
+    `-歌手` 必填；不认识 `-链接` / `-封面`（手动投稿没有这两项）。
+    """
+    if not tokens:
+        return None, TEXT_PICK_MANUAL_USAGE
+
+    title_tokens: List[str] = []
+    cursor = 0
+    while cursor < len(tokens) and not _is_flag(tokens[cursor]):
+        title_tokens.append(tokens[cursor])
+        cursor += 1
+    title = " ".join(title_tokens).strip()
+    if not title:
+        return None, TEXT_PICK_MANUAL_USAGE
+    if cursor >= len(tokens):
+        return None, TEXT_PICK_MANUAL_ARTIST_REQUIRED
+
+    artist: Optional[str] = None
+    play_time_index: Optional[int] = None
+    card_code: Optional[str] = None
+    note: Optional[str] = None
+    seen: set = set()
+
+    while cursor < len(tokens):
+        start = cursor
+        key, value, cursor, error = _parse_flag(tokens, cursor)
+        if error:
+            # `-歌手` 落在末尾没有值：给出手动投稿专属文案而非通用参数错误
+            if error == TEXT_PICK_INVALID:
+                missing = _strip_flag_prefix(tokens[start])
+                if missing in PICK_ARTIST_KEYS and start + 1 >= len(tokens):
+                    return None, TEXT_PICK_MANUAL_ARTIST_REQUIRED
+            return None, error
+        if key is None:
+            return None, TEXT_PICK_INVALID
+        if key in seen:
+            return None, TEXT_PICK_INVALID
+        seen.add(key)
+
+        if key in PICK_ARTIST_KEYS:
+            if not value:
+                return None, TEXT_PICK_MANUAL_ARTIST_REQUIRED
+            artist = value
+        elif key in PICK_PLAY_TIME_KEYS:
+            parsed = _parse_index(value)
+            if parsed is None:
+                return None, TEXT_PLAY_TIME_INVALID
+            play_time_index = parsed
+        elif key in PICK_CARD_KEYS:
+            if not value or len(value) > MAX_CARD_LENGTH:
+                return None, TEXT_PICK_INVALID
+            card_code = value.upper()
+        elif key in PICK_NOTE_KEYS:
+            if not value:
+                return None, TEXT_NOTE_EMPTY
+            if len(value) > MAX_NOTE_LENGTH:
+                return None, TEXT_NOTE_TOO_LONG
+            note = value
+        else:
+            return None, TEXT_PICK_INVALID
+
+    if not artist:
+        return None, TEXT_PICK_MANUAL_ARTIST_REQUIRED
+
+    return (
+        PickArgs(
+            index=1,
+            play_time_index=play_time_index,
+            card_code=card_code,
+            note=note,
+            manual={"title": title, "artist": artist},
+        ),
+        "",
+    )
 
 
 # ----------------------------------------------------------------------
@@ -506,6 +719,162 @@ class VoiceHubSongClient:
             song_id=song_id if isinstance(song_id, int) and not isinstance(song_id, bool) else None,
         )
 
+    async def request_song_manual(
+        self,
+        umo: str,
+        title: str,
+        artist: str,
+        card_code: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> SongRequestOutcome:
+        """手动投稿（无搜索候选）：走 song-request 的 manual 分支。
+
+        Args:
+            umo: 当前私聊会话的 unified_msg_origin。
+            title: 歌名（解析器已裁剪）。
+            artist: 歌手（`-歌手` 必填）。
+            card_code: 点歌券码，提交前统一大写。
+            note: 附言。
+
+        Returns:
+            归一化的投稿结果。
+        """
+        payload: Dict[str, Any] = {
+            "umo": umo,
+            "manual": {"title": title, "artist": artist},
+        }
+        if card_code:
+            payload["cardCode"] = card_code.strip().upper()
+        if note:
+            payload["note"] = str(note).strip()
+
+        body = await self._post(
+            SONG_REQUEST_PATH, payload, lambda message: SongRequestOutcome(ok=False, message=message)
+        )
+        if isinstance(body, SongRequestOutcome):
+            return body
+        if body.get("success") is not True:
+            return SongRequestOutcome(ok=False, message=self._error_message(body, 200))
+        return SongRequestOutcome(
+            ok=True,
+            message=str(body.get("message") or ""),
+            song_id=None,
+        )
+
+    async def resolve(self, umo: str, text: str) -> SongSearchOutcome:
+        """解析分享链接为单曲候选（与搜索同形的票据，序号 1）。
+
+        Args:
+            umo: 当前私聊会话的 unified_msg_origin。
+            text: 用户粘贴的分享文本（含链接）。
+
+        Returns:
+            归一化的解析结果；复用 SongSearchOutcome 结构（单条候选）。
+        """
+        payload = {"umo": umo, "text": str(text or "").strip()}
+        body = await self._post(
+            SONG_RESOLVE_PATH, payload, lambda message: SongSearchOutcome(ok=False, message=message)
+        )
+        if isinstance(body, SongSearchOutcome):
+            return body
+        if body.get("success") is not True:
+            return SongSearchOutcome(ok=False, message=self._error_message(body, 200))
+        return SongSearchOutcome(
+            ok=True,
+            message="",
+            session_token=str(body.get("sessionToken") or ""),
+            platform=str(body.get("platform") or DEFAULT_PLATFORM),
+            keyword=str(body.get("keyword") or ""),
+            candidates=parse_candidates(body.get("items")),
+        )
+
+    async def fetch_sources(self) -> SongSourcesOutcome:
+        """读取站点音源启用列表（`-平台 序号` 的映射依据）。
+
+        Returns:
+            归一化的音源列表结果；失败收敛为 ok=False。
+        """
+        if not self.config.voicehub_base_url:
+            return SongSourcesOutcome(ok=False, message=TEXT_NO_BASE_URL)
+
+        url = f"{self.config.voicehub_base_url}{SONG_SOURCES_PATH}"
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.get(
+                    url, headers=self._headers(), allow_redirects=False
+                ) as response:
+                    if response.status != 200:
+                        body = await self._read_json(response)
+                        if response.status >= 400:
+                            return SongSourcesOutcome(
+                                ok=False, message=self._error_message(body, response.status)
+                            )
+                        return SongSourcesOutcome(ok=False, message=TEXT_FAILED)
+                    body = await self._read_json(response)
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            return SongSourcesOutcome(ok=False, message=TEXT_NETWORK)
+        except Exception:  # noqa: BLE001 - 音源列表失败不得影响点歌链路
+            return SongSourcesOutcome(ok=False, message=TEXT_FAILED)
+
+        if body.get("success") is not True:
+            return SongSourcesOutcome(ok=False, message=self._error_message(body, 200))
+
+        sources: List[SongSource] = []
+        for raw in body.get("sources") or []:
+            if not isinstance(raw, dict):
+                continue
+            index = raw.get("index")
+            key = raw.get("key")
+            if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+                continue
+            if not isinstance(key, str) or not key:
+                continue
+            name = raw.get("name")
+            sources.append(SongSource(
+                index=index,
+                key=key,
+                name=name if isinstance(name, str) and name else format_platform(key),
+            ))
+        return SongSourcesOutcome(ok=True, message="", sources=sources)
+
+    async def password_reset(
+        self,
+        umo: str,
+        step: str,
+        password: str,
+        pending_token: Optional[str] = None,
+    ) -> PasswordResetOutcome:
+        """重置密码（两步）。
+
+        Args:
+            umo: 当前私聊会话的 unified_msg_origin。
+            step: `init` 或 `confirm`。
+            password: 新密码。
+            pending_token: confirm 步骤必带（init 返回的 pendingToken）。
+
+        Returns:
+            归一化的重置结果。
+        """
+        payload: Dict[str, Any] = {"umo": umo, "step": step, "password": password}
+        if pending_token:
+            payload["pendingToken"] = pending_token
+        body = await self._post(
+            PASSWORD_RESET_PATH, payload, lambda message: PasswordResetOutcome(ok=False, message=message)
+        )
+        if isinstance(body, PasswordResetOutcome):
+            return body
+        if body.get("success") is not True:
+            return PasswordResetOutcome(ok=False, message=self._error_message(body, 200))
+        expires = body.get("expiresInSeconds")
+        return PasswordResetOutcome(
+            ok=True,
+            message=str(body.get("message") or ""),
+            pending_token=str(body.get("pendingToken") or "") or None,
+            expires_in_seconds=(
+                expires if isinstance(expires, int) and not isinstance(expires, bool) else None
+            ),
+        )
+
     async def fetch_play_times(self) -> PlayTimeOutcome:
         """读取站点开放的播出时段。
 
@@ -619,6 +988,13 @@ class SongService:
         self._now = now or time.monotonic
         self._sessions: Dict[str, SongSession] = {}
         self._last_pick: Dict[str, float] = {}
+        # 重置密码 pending：(时间戳, 密码, pendingToken)。TTL 由服务端裁决（5 分钟），
+        # 插件侧用同样窗口做过期兜底。
+        self._reset_pending: Dict[str, tuple] = {}
+        self._reset_ttl_seconds = 300.0
+        # 音源启用列表缓存：(时间戳, sources)。列表很少变，缓存 5 分钟。
+        self._sources_cache: Optional[tuple] = None
+        self._sources_ttl_seconds = 300.0
 
     # -- 会话状态 ------------------------------------------------------
 
@@ -635,7 +1011,7 @@ class SongService:
     # -- 指令入口 ------------------------------------------------------
 
     async def song(self, umo: str, group_id: str, keyword: str) -> str:
-        """`/广播 点歌 <关键词>`（关键词为保留字 `时段` 时改为查看播出时段）。"""
+        """`/广播 点歌 <关键词> [-平台 平台|序号]`（`时段` 为保留字）。"""
         refusal = self._guard(umo, group_id)
         if refusal:
             return refusal
@@ -646,7 +1022,56 @@ class SongService:
         if not text or len(text) > MAX_KEYWORD_LENGTH:
             return TEXT_USAGE_SONG
 
-        outcome = await self._call(self.client.search(umo, text))
+        # 分享链接解析：参数含音乐链接（网易云/QQ音乐/B站）时走解析端点
+        # 开关 share_link_auto_resolve 默认关闭；关闭时按普通关键词搜索。
+        if self.config.share_link_auto_resolve and looks_like_share_link(text):
+            outcome = await self._call(self.client.resolve(umo, text))
+            if outcome is None:
+                return TEXT_NETWORK
+            if not outcome.ok:
+                return outcome.message or TEXT_FAILED
+            if not outcome.candidates:
+                return TEXT_RESOLVE_UNRECOGNIZED
+            candidate = outcome.candidates[0]
+            self._sessions[umo] = SongSession(
+                session_token=outcome.session_token,
+                platform=outcome.platform,
+                keyword=outcome.keyword,
+                candidates=[candidate],
+                created_at=self._now(),
+            )
+            return render_resolved_song(outcome.platform, candidate)
+
+        # `-平台 平台|序号`：JVM 风格取值（取 -平台 后的下一个 token）。
+        platform_override: Optional[str] = None
+        tokens = text.split()
+        keep: List[str] = []
+        cursor = 0
+        while cursor < len(tokens):
+            token = tokens[cursor]
+            key = token[2:] if token.startswith("--") else (token[1:] if token.startswith("-") else "")
+            if key.lower() in PICK_PLATFORM_KEYS:
+                if cursor + 1 >= len(tokens):
+                    return TEXT_PLATFORM_INVALID
+                value = tokens[cursor + 1]
+                cursor += 2
+                resolved = resolve_platform_argument(value)
+                if resolved is None:
+                    resolved = await self.resolve_platform(value)
+                if resolved is None:
+                    return TEXT_PLATFORM_INVALID
+                platform_override = resolved
+            else:
+                keep.append(token)
+                cursor += 1
+        search_keyword = " ".join(keep).strip()
+        if not search_keyword:
+            return TEXT_USAGE_SONG
+        if len(search_keyword) > MAX_KEYWORD_LENGTH:
+            return TEXT_USAGE_SONG
+
+        platform = platform_override or DEFAULT_PLATFORM
+        outcome = await self._call(self.client.search(umo, search_keyword, platform=platform))
         if outcome is None:
             return TEXT_NETWORK
         if not outcome.ok:
@@ -663,6 +1088,39 @@ class SongService:
             created_at=self._now(),
         )
         return render_song_list(outcome.keyword, outcome.platform, candidates)
+
+    async def site(self, umo: str, group_id: str) -> str:
+        """`/广播 点歌地址`：回复配置的站点地址（仅私聊）。"""
+        del umo  # 点歌地址不依赖会话状态
+        if group_id:
+            return TEXT_SITE_GROUP_ONLY
+        base_url = self.config.voicehub_base_url
+        if not base_url:
+            return TEXT_SITE_NO_BASE_URL
+        return f"点歌网站地址：{base_url}"
+
+    async def resolve_platform(self, raw: Any) -> Optional[str]:
+        """把 `-平台` 取值解析为平台键。
+
+        名称词由 `resolve_platform_argument` 直接映射；纯数字走音源启用
+        列表（5 分钟缓存）。无法解析返回 None（上层给定点文案）。
+        """
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        if text.isdigit():
+            cached = self._sources_cache
+            if cached is None or (self._now() - cached[0]) > self._sources_ttl_seconds:
+                outcome = await self._call(self.client.fetch_sources())
+                if outcome is None or not outcome.ok:
+                    return None
+                self._sources_cache = (self._now(), outcome.sources)
+                cached = self._sources_cache
+            for source in cached[1]:
+                if source.index == int(text):
+                    return source.key
+            return None
+        return resolve_platform_argument(text)
 
     async def song_time(self, umo: str, group_id: str) -> str:
         """`/vh song time`：列出可选播出时段。"""
@@ -693,12 +1151,28 @@ class SongService:
         if args is None:
             return error or TEXT_USAGE_PICK
 
+        if self._cooling_down(umo):
+            return TEXT_COOLDOWN
+
+        # 手动投稿：无需点歌会话（没有搜索结果的票据），直接走 manual 分支
+        if args.manual is not None:
+            outcome = await self._call(self.client.request_song_manual(
+                umo,
+                title=args.manual["title"],
+                artist=args.manual["artist"],
+                card_code=args.card_code,
+                note=args.note,
+            ))
+            if outcome is None:
+                return TEXT_NETWORK
+            if not outcome.ok:
+                return outcome.message or TEXT_FAILED
+            self._last_pick[umo] = self._now()
+            return outcome.message or TEXT_FAILED
+
         session = self.session(umo)
         if session is None:
             return TEXT_NO_SESSION
-
-        if self._cooling_down(umo):
-            return TEXT_COOLDOWN
 
         play_time_id: Optional[int] = None
         if args.play_time_index is not None:
@@ -722,6 +1196,56 @@ class SongService:
         if not outcome.ok:
             return outcome.message or TEXT_FAILED
         return outcome.message or TEXT_FAILED
+
+    async def reset_password(self, umo: str, group_id: str, raw_args: str) -> str:
+        """`/广播 重置密码 <新密码>` 与 `确认 <新密码>`（两步确认，私聊专用）。"""
+        if group_id:
+            # 群聊拒绝不读参数：避免新密码出现在群消息上下文
+            return TEXT_RESET_GROUP_ONLY
+
+        text = str(raw_args or "").strip()
+        if not text:
+            return TEXT_RESET_USAGE
+
+        tokens = text.split(None, 1)
+        first = tokens[0]
+        rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+        if first.lower() in {kw.lower() for kw in RESET_CONFIRM_KEYWORDS}:
+            if not rest:
+                return TEXT_RESET_CONFIRM_USAGE
+            pending = self._reset_pending.get(umo)
+            if pending is None or (self._now() - pending[0]) > self._reset_ttl_seconds:
+                self._reset_pending.pop(umo, None)
+                return TEXT_RESET_CONFIRM_INVALID
+            _, first_password, pending_token = pending
+            if rest != first_password:
+                # 不一致即作废 pending，要求重新发起
+                self._reset_pending.pop(umo, None)
+                return TEXT_RESET_MISMATCH
+
+            outcome = await self._call(self.client.password_reset(umo, "confirm", rest, pending_token))
+            if outcome is None:
+                return TEXT_NETWORK
+            self._reset_pending.pop(umo, None)
+            if not outcome.ok:
+                return outcome.message or TEXT_RESET_CONFIRM_INVALID
+            return outcome.message or "密码重置成功"
+
+        # 第一步：新密码即参数原文
+        password = text
+        if len(password) > 128:
+            return TEXT_RESET_USAGE
+
+        outcome = await self._call(self.client.password_reset(umo, "init", password))
+        if outcome is None:
+            return TEXT_NETWORK
+        if not outcome.ok:
+            return outcome.message or TEXT_FAILED
+        if not outcome.pending_token:
+            return TEXT_RESET_CONFIRM_USAGE
+        self._reset_pending[umo] = (self._now(), password, outcome.pending_token)
+        return TEXT_RESET_CONFIRM_USAGE
 
     # -- 内部 ----------------------------------------------------------
 

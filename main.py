@@ -189,15 +189,29 @@ class VoiceHubPlugin(Star):
 
     @vh.command("点歌", alias={"song"})
     async def vh_song(self, event: AstrMessageEvent, keyword: GreedyStr):
-        """搜索歌曲：/广播 点歌 <关键词>（`时段` 为保留字，用于查看播出时段）"""
+        """搜索歌曲：/广播 点歌 <关键词> [-平台 平台序号|名称]（`时段` 为保留字）"""
         yield event.plain_result(await self.song_service.song(
             event.unified_msg_origin, event.get_group_id(), keyword
         ))
 
+    @vh.command("点歌地址", alias={"site"})
+    async def vh_site(self, event: AstrMessageEvent):
+        """查询点歌网站地址：/广播 点歌地址"""
+        yield event.plain_result(await self.song_service.site(
+            event.unified_msg_origin, event.get_group_id()
+        ))
+
     @vh.command("选歌", alias={"pick"})
     async def vh_pick(self, event: AstrMessageEvent, args: GreedyStr):
-        """按序号投稿：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]"""
+        """按序号投稿：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/广播 选歌 手动 <歌名> -歌手 <歌手>"""
         yield event.plain_result(await self.song_service.pick(
+            event.unified_msg_origin, event.get_group_id(), args
+        ))
+
+    @vh.command("重置密码", alias={"resetpassword"})
+    async def vh_reset_password(self, event: AstrMessageEvent, args: GreedyStr):
+        """重置 VoiceHub 密码（两步确认，私聊专用）：/广播 重置密码 <新密码>；5 分钟内 /广播 重置密码 确认 <新密码>"""
+        yield event.plain_result(await self.song_service.reset_password(
             event.unified_msg_origin, event.get_group_id(), args
         ))
 

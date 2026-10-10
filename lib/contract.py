@@ -16,6 +16,12 @@ ACK_PATH = "/api/bot/voicehub/ack"
 # 点歌：插件回查 VoiceHub 的搜索与投稿接口
 SONG_SEARCH_PATH = "/api/bot/voicehub/song-search"
 SONG_REQUEST_PATH = "/api/bot/voicehub/song-request"
+# 分享链接解析（网易云/QQ音乐/B站）
+SONG_RESOLVE_PATH = "/api/bot/voicehub/song-resolve"
+# 点歌音源启用列表（序号即站点音源控制里的启用顺序）
+SONG_SOURCES_PATH = "/api/bot/voicehub/song-sources"
+# 重置密码（两步确认）
+PASSWORD_RESET_PATH = "/api/bot/voicehub/password-reset"
 
 # 播出时段列表：站点既有的公开接口（与站点前端 RequestForm 同源）
 PLAY_TIMES_PATH = "/api/play-times"
