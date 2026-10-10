@@ -23,16 +23,26 @@ def plugin():
             fn.command = lambda sub, **options: lambda method: method
             return fn
         return decorate
-    event.filter = types.SimpleNamespace(command_group=group)
+    event.filter = types.SimpleNamespace(
+        command_group=group,
+        custom_filter=lambda *args, **kwargs: lambda method: method,
+        event_message_type=lambda *args, **kwargs: lambda method: method,
+        EventMessageType=types.SimpleNamespace(ALL=3, GROUP_MESSAGE=1, PRIVATE_MESSAGE=2),
+    )
     event.MessageChain = type("MessageChain", (), {"message": lambda self, text: text})
+    event_filter = types.ModuleType("astrbot.api.event.filter")
+    event_filter.CustomFilter = type("CustomFilter", (), {"__init__": lambda self, *a, **k: None})
+    event_filter.custom_filter = lambda *args, **kwargs: (lambda method: method)
+    event_filter.event_message_type = lambda *args, **kwargs: (lambda method: method)
     star = types.ModuleType("astrbot.api.star")
     star.Context = type("Context", (), {})
     star.Star = type("Star", (), {"__init__": lambda self, context: setattr(self, "context", context)})
     star.register = lambda *args: lambda cls: cls
-    original = {key: sys.modules.get(key) for key in ("astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star")}
+    original = {key: sys.modules.get(key) for key in ("astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.event.filter", "astrbot.api.star")}
     sys.modules["astrbot"] = types.ModuleType("astrbot")
     sys.modules["astrbot.api"] = api
     sys.modules["astrbot.api.event"] = event
+    sys.modules["astrbot.api.event.filter"] = event_filter
     sys.modules["astrbot.api.star"] = star
     command = types.ModuleType("astrbot.core.star.filter.command")
     command.GreedyStr = type("GreedyStr", (str,), {})

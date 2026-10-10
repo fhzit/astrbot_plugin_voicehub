@@ -96,6 +96,12 @@
     "default": false,
     "hint": "开启后，私聊里 /广播 点歌 的参数若是网易云音乐/QQ音乐/哔哩哔哩的分享链接（含 163cn.tv、b23.tv 短链），自动解析成单条候选，回复「/广播 选歌 1」完成点歌。仅影响私聊；默认关闭。"
   },
+  "share_link_passive_resolve": {
+    "description": "私聊裸发链接直接解析",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，私聊里直接发送音乐分享链接（无需 /广播 点歌 指令）即自动解析成候选；解析成功后本条消息会被本插件终结，不再交给其他插件或 AI 处理。仅影响私聊；默认关闭。"
+  },
   "weekly_output_mode": {
     "description": "本周歌单输出形式",
     "type": "string",

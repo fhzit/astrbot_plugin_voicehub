@@ -132,6 +132,7 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `song_enabled`：默认开启。关闭后 `/广播 点歌` 与 `/广播 选歌` 回复「点歌功能未启用。」。
 - `song_result_count`：点歌搜索展示的候选条数，默认 5，**上限 5**（超出按 5 处理）。
 - `share_link_auto_resolve`：默认关闭。开启后，私聊 `/广播 点歌` 的参数若是网易云音乐/QQ音乐/哔哩哔哩的分享链接（含 163cn.tv、b23.tv 短链），自动解析成单条候选，回复「/广播 选歌 1」完成点歌；关闭时链接文本按普通关键词搜索。
+- `share_link_passive_resolve`：默认关闭。开启后，私聊里**直接发送**音乐分享链接（无需任何指令）即自动解析成候选，回复「/广播 选歌 1」完成点歌；解析成功后本条消息会被终结，不再交给其他插件或 AI 处理，解析失败/非链接消息则照常放行。仅影响私聊；受 `song_enabled` 总开关约束。
 - `weekly_output_mode`：本周歌单输出形式，默认 `image`。`image` 按 VoiceHub 后台的显示项与排版配置出图；`text` 直接发送 VoiceHub 生成的纯文本。填其他值按 `image` 处理；单次强制文本可用 `/广播 本周歌单 文本`。
 
 首次生成歌单图片会自动下载 HarmonyOS Sans SC 字体到插件数据目录并缓存；若下载失败，指令会报错，请检查 AstrBot 出站网络后重试。无需额外部署浏览器或生图服务。

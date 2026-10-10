@@ -27,8 +27,22 @@ def _install_astrbot_stubs() -> None:
             return fn
         return decorate
 
-    event.filter = types.SimpleNamespace(command_group=command_group)
+    event.filter = types.SimpleNamespace(
+        command_group=command_group,
+        custom_filter=lambda *args, **kwargs: (lambda method: method),
+        event_message_type=lambda *args, **kwargs: (lambda method: method),
+        EventMessageType=types.SimpleNamespace(ALL=3, GROUP_MESSAGE=1, PRIVATE_MESSAGE=2),
+    )
     event.MessageChain = type("MessageChain", (), {"message": lambda self, text: text})
+    # astrbot.api.event.filter 子模块：CustomFilter 与注册装饰器桩
+    event_filter = types.ModuleType("astrbot.api.event.filter")
+    event_filter.CustomFilter = type(
+        "CustomFilter",
+        (),
+        {"__init__": lambda self, *args, **kwargs: None},
+    )
+    event_filter.event_message_type = lambda *args, **kwargs: (lambda method: method)
+    event_filter.custom_filter = lambda *args, **kwargs: (lambda method: method)
     star = types.ModuleType("astrbot.api.star")
     star.Context = type("Context", (), {})
     star.Star = type("Star", (), {"__init__": lambda self, context: setattr(self, "context", context)})
@@ -40,6 +54,7 @@ def _install_astrbot_stubs() -> None:
         "astrbot": types.ModuleType("astrbot"),
         "astrbot.api": api,
         "astrbot.api.event": event,
+        "astrbot.api.event.filter": event_filter,
         "astrbot.api.star": star,
         "astrbot.core": types.ModuleType("astrbot.core"),
         "astrbot.core.star": types.ModuleType("astrbot.core.star"),

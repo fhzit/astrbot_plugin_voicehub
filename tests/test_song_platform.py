@@ -737,3 +737,98 @@ def test_reset_password_init_failure_returns_server_message():
         assert reply == "密码太短"
 
     asyncio.run(run())
+
+
+# ----------------------------------------------------------------------
+# resolve_passive（裸发链接免指令解析，share_link_passive_resolve 开关）
+# ----------------------------------------------------------------------
+
+def test_passive_resolve_disabled_returns_none():
+    """开关默认关：裸发链接不处理，放行给其他插件/AI。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        service = SongService(_config("http://stub.invalid"), client=client)
+        return await service.resolve_passive(UMO, "", _SHARE_TEXT), client
+
+    reply, client = asyncio.run(run())
+    assert reply is None
+    assert client.resolve_calls == []
+
+
+def test_passive_resolve_group_returns_none():
+    """群聊永不处理（防刷屏），即使开关已开。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        service = SongService(_config("http://stub.invalid", share_link_passive_resolve=True), client=client)
+        return await service.resolve_passive(UMO, "123456", _SHARE_TEXT), client
+
+    reply, client = asyncio.run(run())
+    assert reply is None
+    assert client.resolve_calls == []
+
+
+def test_passive_resolve_song_disabled_returns_none():
+    """点歌总开关关闭时被动解析一并停用。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        service = SongService(_config("http://stub.invalid", share_link_passive_resolve=True, song_enabled=False), client=client)
+        return await service.resolve_passive(UMO, "", _SHARE_TEXT), client
+
+    reply, client = asyncio.run(run())
+    assert reply is None
+    assert client.resolve_calls == []
+
+
+def test_passive_resolve_success_writes_session_and_replies():
+    """开关开：裸发链接解析成功，回复候选并写单元素会话（选歌 1 确认）。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        service = SongService(_config("http://stub.invalid", share_link_passive_resolve=True), client=client)
+        reply = await service.resolve_passive(UMO, "", _SHARE_TEXT)
+        return reply, service
+
+    reply, service = asyncio.run(run())
+    assert "已识别：晴天 - 周杰伦（音源：网易云音乐）" in reply
+    assert "选歌 1" in reply
+    session = service.session(UMO)
+    assert session is not None
+    assert len(session.candidates) == 1
+    assert session.candidates[0].title == "晴天"
+
+
+def test_passive_resolve_non_link_returns_none():
+    """普通文本（非链接）不处理，避免误拦正常聊天。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        service = SongService(_config("http://stub.invalid", share_link_passive_resolve=True), client=client)
+        return await service.resolve_passive(UMO, "", "今天天气不错"), client
+
+    reply, client = asyncio.run(run())
+    assert reply is None
+    assert client.resolve_calls == []
+
+
+def test_passive_resolve_failure_releases_message():
+    """解析无候选/失败时返回 None 放行，不拦截消息。"""
+    async def run():
+        client = _ResolveRecordingClient()
+        client._resolve = SongSearchOutcome(ok=True, message="", session_token="t", platform="netease", keyword="", candidates=[])
+        service = SongService(_config("http://stub.invalid", share_link_passive_resolve=True), client=client)
+        reply = await service.resolve_passive(UMO, "", _SHARE_TEXT)
+        client._resolve = SongSearchOutcome(ok=False, message="无法识别的分享链接")
+        reply2 = await service.resolve_passive(UMO, "", _SHARE_TEXT)
+        return reply, reply2
+
+    reply, reply2 = asyncio.run(run())
+    assert reply is None
+    assert reply2 is None
+
+
+def test_passive_resolve_command_text_not_intercepted():
+    """以「/」开头的消息在过滤器层就不会进被动解析（防与指令双触发）。"""
+    from astrbot_plugin_voicehub.lib.song import looks_like_share_link
+
+    text = "/广播 点歌 https://music.163.com/song?id=186016"
+    # 过滤器判定逻辑与 main._ShareLinkFilter.filter 保持一致：指令放行
+    assert text.startswith("/")
+    assert looks_like_share_link(text)  # 指令参数里的链接仍由点歌指令处理

@@ -12,6 +12,7 @@ from typing import Optional
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event.filter import CustomFilter
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
@@ -21,10 +22,26 @@ from .lib.pull import VoiceHubPullClient
 from .lib.push import PushService
 from .lib.schedule_image import generate_weekly_schedule_image
 from .lib.server import VoiceHubHttpServer
-from .lib.song import SongService
+from .lib.song import SongService, looks_like_share_link
 from .lib.voicehub import VoiceHubClient
 
 _FONT_DIR = Path.home() / ".astrbot/data/plugin_data/astrbot_plugin_voicehub"
+
+
+class _ShareLinkFilter(CustomFilter):
+    """私聊且消息形似音乐分享链接（非「/」开头指令）时才激活 handler。
+
+    过滤阶段只做零成本判定；开关状态在 filter 内读取不到（过滤器
+    实例早于配置构造），由 resolve_passive 内部按开关放行/拒绝。
+    """
+
+    def filter(self, event: AstrMessageEvent, cfg) -> bool:  # noqa: ANN001 - 框架签名
+        if event.get_group_id():
+            return False
+        text = str(event.message_str or "").strip()
+        if not text or text.startswith("/") or len(text) > 500:
+            return False
+        return looks_like_share_link(text)
 
 
 @register(
@@ -193,6 +210,21 @@ class VoiceHubPlugin(Star):
         yield event.plain_result(await self.song_service.song(
             event.unified_msg_origin, event.get_group_id(), keyword
         ))
+
+    @filter.custom_filter(_ShareLinkFilter(raise_error=False), priority=100)
+    async def on_share_link_message(self, event: AstrMessageEvent):
+        """私聊裸发音乐分享链接直接解析成候选（免指令）。
+
+        解析成功即回复并终结事件传播，其他插件与 AI 不再处理本条消息；
+        解析无候选时不回复、不拦截，消息照常放行。
+        """
+        reply = await self.song_service.resolve_passive(
+            event.unified_msg_origin, event.get_group_id(), event.message_str
+        )
+        if reply is None:
+            return
+        yield event.plain_result(reply)
+        event.stop_event()
 
     @vh.command("点歌地址", alias={"site"})
     async def vh_site(self, event: AstrMessageEvent):

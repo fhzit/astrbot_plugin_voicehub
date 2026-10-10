@@ -156,6 +156,8 @@ class VoiceHubConfig:
     song_result_count: int = 5
     # 点歌参数为分享链接时自动解析成单条候选（默认关闭）
     share_link_auto_resolve: bool = False
+    # 私聊裸发分享链接时免指令解析并阻断事件传播（默认关闭）
+    share_link_passive_resolve: bool = False
 
     # 本周歌单输出形式：image = 按后台配置出图；text = 直接用 VoiceHub 生成的纯文本
     weekly_output_mode: str = "image"
@@ -194,6 +196,7 @@ class VoiceHubConfig:
                 "song_enabled",
                 "song_result_count",
                 "share_link_auto_resolve",
+                "share_link_passive_resolve",
                 "weekly_output_mode",
             ):
                 value = getattr(raw, "get", None)
@@ -223,6 +226,7 @@ class VoiceHubConfig:
             # 上限 5：聊天里展示更多条目没有意义，也不给站点增加无谓压力
             song_result_count=min(5, max(1, _as_int(data.get("song_result_count"), 5))),
             share_link_auto_resolve=_as_bool(data.get("share_link_auto_resolve"), False),
+            share_link_passive_resolve=_as_bool(data.get("share_link_passive_resolve"), False),
             # 只有显式配置为 text 才走纯文本，其余取值一律回退图片
             weekly_output_mode="text" if str(data.get("weekly_output_mode") or "").strip().lower() == "text" else "image",
         )

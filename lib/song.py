@@ -1089,6 +1089,36 @@ class SongService:
         )
         return render_song_list(outcome.keyword, outcome.platform, candidates)
 
+    async def resolve_passive(self, umo: str, group_id: str, text: str) -> Optional[str]:
+        """裸发消息的分享链接解析（免指令，`share_link_passive_resolve` 开关）。
+
+        返回 None 表示本插件不处理该消息（不是链接、未开开关、私聊校验
+        未通过或解析无候选），调用方应放行事件给后续插件与 AI；
+        返回字符串表示解析成功，调用方回复该文案并终结事件传播。
+        """
+        if (
+            group_id
+            or not self.config.share_link_passive_resolve
+            or not self.config.song_enabled
+        ):
+            return None
+        value = str(text or "").strip()
+        if not value or len(value) > MAX_KEYWORD_LENGTH or not looks_like_share_link(value):
+            return None
+        outcome = await self._call(self.client.resolve(umo, value))
+        if outcome is None or not outcome.ok or not outcome.candidates:
+            # 解析失败不拦截：消息放行，交给其他插件或 AI 处理
+            return None
+        candidate = outcome.candidates[0]
+        self._sessions[umo] = SongSession(
+            session_token=outcome.session_token,
+            platform=outcome.platform,
+            keyword=outcome.keyword,
+            candidates=[candidate],
+            created_at=self._now(),
+        )
+        return render_resolved_song(outcome.platform, candidate)
+
     async def site(self, umo: str, group_id: str) -> str:
         """`/广播 点歌地址`：回复配置的站点地址（仅私聊）。"""
         del umo  # 点歌地址不依赖会话状态
