@@ -211,7 +211,7 @@ class VoiceHubPlugin(Star):
             event.unified_msg_origin, event.get_group_id(), keyword
         ))
 
-    @filter.custom_filter(_ShareLinkFilter(raise_error=False), priority=100)
+    @filter.custom_filter(_ShareLinkFilter, priority=100)
     async def on_share_link_message(self, event: AstrMessageEvent):
         """私聊裸发音乐分享链接直接解析成候选（免指令）。
 
