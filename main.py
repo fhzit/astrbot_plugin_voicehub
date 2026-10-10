@@ -189,7 +189,7 @@ class VoiceHubPlugin(Star):
 
     @vh.command("点歌", alias={"song"})
     async def vh_song(self, event: AstrMessageEvent, keyword: GreedyStr):
-        """搜索歌曲：/广播 点歌 <关键词> [-平台 平台序号|名称]（`时段` 为保留字）"""
+        """搜索歌曲：/广播 点歌 <关键词> [-平台 序号|名称]"""
         yield event.plain_result(await self.song_service.song(
             event.unified_msg_origin, event.get_group_id(), keyword
         ))
@@ -203,14 +203,14 @@ class VoiceHubPlugin(Star):
 
     @vh.command("选歌", alias={"pick"})
     async def vh_pick(self, event: AstrMessageEvent, args: GreedyStr):
-        """按序号投稿：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/广播 选歌 手动 <歌名> -歌手 <歌手>"""
+        """投稿歌曲：/广播 选歌 <序号> [选项]；手动投稿 /广播 选歌 手动 <歌名> -歌手 <歌手>"""
         yield event.plain_result(await self.song_service.pick(
             event.unified_msg_origin, event.get_group_id(), args
         ))
 
     @vh.command("重置密码", alias={"resetpassword"})
     async def vh_reset_password(self, event: AstrMessageEvent, args: GreedyStr):
-        """重置 VoiceHub 密码（两步确认，私聊专用）：/广播 重置密码 <新密码>；5 分钟内 /广播 重置密码 确认 <新密码>"""
+        """重置密码（私聊专用，两步确认）：/广播 重置密码 <新密码>，5 分钟内回复 确认 <新密码>"""
         yield event.plain_result(await self.song_service.reset_password(
             event.unified_msg_origin, event.get_group_id(), args
         ))
@@ -235,8 +235,8 @@ class VoiceHubPlugin(Star):
     async def vh_weekly(self, event: AstrMessageEvent, args: GreedyStr = ""):
         """发送本周排期：/广播 本周歌单 [文本]
 
-        默认按 VoiceHub 后台的显示项出图；插件配置或本条指令加「文本」时，
-        直接发送 VoiceHub 生成的纯文本（适合刷屏少的场景与不支持图片的适配器）。
+        默认按 VoiceHub 后台的显示项出图；加「文本」参数或改插件配置
+        weekly_output_mode 可改发纯文本。
         """
         if not self.plugin_config.song_enabled:
             yield event.plain_result("点歌功能未启用，请在插件配置中开启。")
