@@ -134,24 +134,32 @@ class VoiceHubPlugin(Star):
         """VoiceHub 相关指令组（`/广播`，兼容旧写法 `/vh`）。"""
 
     @vh.command("绑定", alias={"bind"})
-    async def vh_bind(self, event: AstrMessageEvent, code: GreedyStr):
-        """绑定 VoiceHub 账号：/广播 绑定 <绑定码>"""
+    async def vh_bind(self, event: AstrMessageEvent, code: GreedyStr = ""):
+        """绑定 VoiceHub 账号。
+
+        用法一：/广播 绑定 —— 机器人回复一次性确认链接，点开登录后确认即可。
+        用法二：/广播 绑定 <绑定码> —— 提交 VoiceHub 生成的一次性绑定码。
+        """
         if not self.plugin_config.webhook_token:
             yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
             return
 
         if event.get_group_id():
             yield event.plain_result(
-                "为避免个人通知被推送到群里，请在机器人私聊中发送绑定码。"
+                "为避免个人通知被推送到群里，请在机器人私聊中完成绑定。"
             )
             return
 
         # AstrBot's CommandFilter strips the wake prefix before matching; use
         # the parsed parameter instead of guessing from the raw message text.
         code = code.strip()
-        if not code or len(code.split()) != 1:
+        if not code:
+            yield event.plain_result(await self._bind_link_text(event))
+            return
+
+        if len(code.split()) != 1:
             yield event.plain_result(
-                "用法：/广播 绑定 <绑定码>。绑定码请在 VoiceHub 的「机器人推送」中生成。"
+                "用法：/广播 绑定（机器人回复确认链接）或 /广播 绑定 <绑定码>。"
             )
             return
 
@@ -164,6 +172,20 @@ class VoiceHubPlugin(Star):
             )
         else:
             yield event.plain_result(f"绑定失败：{result.message}")
+
+    async def _bind_link_text(self, event: AstrMessageEvent) -> str:
+        """申请一次性确认链接，返回要回复给用户的文案。"""
+        result = await self.voicehub_client.create_bind_link(
+            event.unified_msg_origin, event.get_platform_name()
+        )
+        if not result.ok or not result.url:
+            return f"获取绑定链接失败：{result.message or 'VoiceHub 未返回链接'}"
+        minutes = max(1, (result.expires_in or 600) // 60)
+        return (
+            f"请在 {minutes} 分钟内打开下面的链接，登录 VoiceHub 后确认绑定：\n"
+            f"{result.url}\n"
+            "链接等同于本次会话的绑定凭证，不要转发给他人。"
+        )
 
     @vh.command("解绑", alias={"unbind"})
     async def vh_unbind(self, event: AstrMessageEvent):

@@ -74,14 +74,40 @@ class FakeEvent:
 
 
 @pytest.mark.parametrize("message", ["vh bind", "/vh bind", "vh bind   "])
-def test_bind_without_code_never_calls_voicehub(plugin, message):
+def test_bind_without_code_requests_link(plugin, message):
+    """无参数绑定改为申请确认链接，不再要求用户手输绑定码。"""
     async def run():
         p = plugin.VoiceHubPlugin(types.SimpleNamespace(), {"webhook_token": "secret"})
+        captured = []
+
+        async def link(umo, platform):
+            captured.append((umo, platform))
+            return types.SimpleNamespace(
+                ok=True, message="", url="https://vh.example.com/bind/ticket1", expires_in=600
+            )
+
         async def forbidden(*args):
             raise AssertionError("empty binding code sent upstream")
+
+        p.voicehub_client.create_bind_link = link
         p.voicehub_client.verify_binding_code = forbidden
         result = [item async for item in p.vh_bind(FakeEvent(message), "")]
-        assert "用法" in result[0]
+        assert "https://vh.example.com/bind/ticket1" in result[0]
+        assert captured == [("aiocqhttp:FriendMessage:user1", "aiocqhttp")]
+    asyncio.run(run())
+
+
+def test_bind_link_failure_is_reported(plugin):
+    async def run():
+        p = plugin.VoiceHubPlugin(types.SimpleNamespace(), {"webhook_token": "secret"})
+
+        async def link(umo, platform):
+            return types.SimpleNamespace(ok=False, message="该机器人平台未启用", url=None)
+
+        p.voicehub_client.create_bind_link = link
+        result = [item async for item in p.vh_bind(FakeEvent("vh bind"), "")]
+        assert "获取绑定链接失败" in result[0]
+        assert "该机器人平台未启用" in result[0]
     asyncio.run(run())
 
 

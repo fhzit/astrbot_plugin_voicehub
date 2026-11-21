@@ -11,7 +11,14 @@ import aiohttp
 from astrbot.api import logger
 
 from .config import VoiceHubConfig, umo_message_type
-from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, WEEKLY_SCHEDULE_PATH, TOKEN_HEADER
+from .contract import (
+    BIND_LINK_PATH,
+    BIND_PATH,
+    UNBIND_PATH,
+    VERIFY_TARGETS_PATH,
+    WEEKLY_SCHEDULE_PATH,
+    TOKEN_HEADER,
+)
 from .http import describe_client_error, log_network_error, make_session
 
 
@@ -22,6 +29,9 @@ class BindResult:
     ok: bool = False
     message: str = ""
     username: Optional[str] = None
+    # 绑定链接流程：VoiceHub 返回的一次性确认地址与其有效期（秒）
+    url: Optional[str] = None
+    expires_in: Optional[int] = None
 
 
 class VoiceHubClient:
@@ -64,6 +74,10 @@ class VoiceHubClient:
                         ok=body.get("success") is True,
                         message=str(body.get("message") or ""),
                         username=body.get("username"),
+                        url=body.get("url") if isinstance(body.get("url"), str) else None,
+                        expires_in=body.get("expiresIn")
+                        if isinstance(body.get("expiresIn"), int)
+                        else None,
                     )
         except aiohttp.ClientError as exc:
             log_network_error(logger, "绑定/解绑", exc, path)
@@ -88,6 +102,21 @@ class VoiceHubClient:
         if isinstance(message, str) and message.strip():
             return message.strip()
         return f"VoiceHub 返回状态码 {status}"
+
+    async def create_bind_link(self, umo: str, platform: str) -> BindResult:
+        """为当前会话申请一次性绑定链接。
+
+        用户在浏览器登录后确认，VoiceHub 才会把该会话绑定到账号；插件只负责
+        把链接送到当前私聊，不接触任何账号凭据。
+
+        Args:
+            umo: 当前会话的 unified_msg_origin。
+            platform: 当前平台适配器名。
+
+        Returns:
+            成功时 ``url`` 为确认地址，``expires_in`` 为有效期秒数。
+        """
+        return await self._post(BIND_LINK_PATH, {"umo": umo, "platform": platform})
 
     async def verify_binding_code(self, code: str, umo: str, platform: str) -> BindResult:
         """提交绑定码完成用户与会话的绑定。

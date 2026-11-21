@@ -124,3 +124,92 @@ def test_revoked_target_must_not_reuse_positive_authorization():
         finally:
             await runner.cleanup()
     asyncio.run(run())
+
+
+def test_bind_link_uses_dedicated_path_and_parses_ticket():
+    """绑定链接走独立端点，且只把 url / expiresIn 透传给指令层。"""
+    async def run():
+        requests = []
+
+        async def link(request):
+            requests.append(
+                (request.path, request.headers.get("X-VoiceHub-Token"), await request.json())
+            )
+            return web.json_response(
+                {"success": True, "url": "https://vh.example.com/bind/abc", "expiresIn": 600}
+            )
+
+        app = web.Application()
+        app.router.add_post("/api/bot/voicehub/bind-link", link)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            client = VoiceHubClient(
+                VoiceHubConfig.from_mapping(
+                    {"webhook_token": "secret", "voicehub_base_url": f"http://127.0.0.1:{port}"}
+                )
+            )
+            result = await client.create_bind_link("aiocqhttp:FriendMessage:user", "aiocqhttp")
+            assert result.ok
+            assert result.url == "https://vh.example.com/bind/abc"
+            assert result.expires_in == 600
+            assert requests == [
+                (
+                    "/api/bot/voicehub/bind-link",
+                    "secret",
+                    {"umo": "aiocqhttp:FriendMessage:user", "platform": "aiocqhttp"},
+                )
+            ]
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+def test_bind_link_refuses_redirect_and_malformed_url():
+    async def run():
+        async def redirect(request):
+            raise web.HTTPTemporaryRedirect(location="/stolen")
+
+        async def bad(request):
+            return web.json_response({"success": True, "url": 123})
+
+        app = web.Application()
+        app.router.add_post("/api/bot/voicehub/bind-link", redirect)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            client = VoiceHubClient(
+                VoiceHubConfig.from_mapping(
+                    {"webhook_token": "secret", "voicehub_base_url": f"http://127.0.0.1:{port}"}
+                )
+            )
+            assert not (await client.create_bind_link("a:FriendMessage:b", "aiocqhttp")).ok
+        finally:
+            await runner.cleanup()
+
+        app = web.Application()
+        app.router.add_post("/api/bot/voicehub/bind-link", bad)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            client = VoiceHubClient(
+                VoiceHubConfig.from_mapping(
+                    {"webhook_token": "secret", "voicehub_base_url": f"http://127.0.0.1:{port}"}
+                )
+            )
+            result = await client.create_bind_link("a:FriendMessage:b", "aiocqhttp")
+            assert result.ok and result.url is None
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
