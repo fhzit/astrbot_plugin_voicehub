@@ -17,7 +17,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .lib.config import VoiceHubConfig, dropped_umo_values
-from .lib.font_manager import ensure_fonts, fonts_already_exist
+from .lib.font_manager import FontDownloadError, ensure_fonts, fonts_already_exist
 from .lib.pull import VoiceHubPullClient
 from .lib.push import PushService
 from .lib.schedule_image import generate_weekly_schedule_image
@@ -26,6 +26,14 @@ from .lib.song import SongService, looks_like_share_link
 from .lib.voicehub import VoiceHubClient
 
 _FONT_DIR = Path.home() / ".astrbot/data/plugin_data/astrbot_plugin_voicehub"
+
+
+def _error_text(exc: BaseException) -> str:
+    """异常文案兜底：``str(exc)`` 为空时（如 TimeoutError）用类型名，避免空冒号。"""
+    text = str(exc).strip()
+    if text:
+        return text
+    return type(exc).__name__ or repr(exc)
 
 
 class _ShareLinkFilter(CustomFilter):
@@ -247,6 +255,13 @@ class VoiceHubPlugin(Star):
             event.unified_msg_origin, event.get_group_id(), args
         ))
 
+    def _font_dir(self) -> Path:
+        """字体目录：配置 ``font_dir`` 优先（支持离线预置），否则用插件数据目录。"""
+        configured = str(getattr(self.plugin_config, "font_dir", "") or "").strip()
+        if configured:
+            return Path(configured).expanduser()
+        return _FONT_DIR
+
     def _weekly_use_text(self, args: str) -> bool:
         """判断本次本周歌单是否走纯文本。
 
@@ -292,15 +307,26 @@ class VoiceHubPlugin(Star):
             return
 
         # 字体首次下载约需 15 秒，提前告知用户
-        font_dir = _FONT_DIR
+        font_dir = self._font_dir()
         font_dir.mkdir(parents=True, exist_ok=True)
         if not fonts_already_exist(font_dir):
             logger.info("[VoiceHub] 首次使用排期图片功能，正在下载字体（约 16 MB），请稍候……")
 
         try:
-            fonts = await ensure_fonts(font_dir, logger)
+            fonts = await ensure_fonts(
+                font_dir, logger, sources=self.plugin_config.font_urls
+            )
+        except FontDownloadError as exc:
+            # 完整原因（每个下载源的具体失败）写日志，聊天里只给可操作的简述
+            logger.error("[VoiceHub] 字体下载失败：%s", exc)
+            yield event.plain_result(f"字体下载失败，无法生成排期图片：{exc.short}")
+            return
         except Exception as exc:  # noqa: BLE001
-            yield event.plain_result(f"字体下载失败，无法生成排期图片：{exc}")
+            logger.error("[VoiceHub] 字体准备失败：%r", exc)
+            logger.debug("[VoiceHub] 字体准备失败详情", exc_info=True)
+            yield event.plain_result(
+                f"字体下载失败，无法生成排期图片：{_error_text(exc)}"
+            )
             return
 
         try:

@@ -25,6 +25,7 @@ from .contract import (
     SONG_SOURCES_PATH,
     TOKEN_HEADER,
 )
+from .http import make_session
 
 # 会话有效期与投稿冷却（逐字要求：10 分钟 / 5 秒）
 SONG_SESSION_TTL_SECONDS = 600
@@ -616,7 +617,7 @@ class VoiceHubSongClient:
 
         url = f"{self.config.voicehub_base_url}{path}"
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            async with make_session(self.timeout) as session:
                 async with session.post(
                     url, json=payload, headers=self._headers(), allow_redirects=False
                 ) as response:
@@ -799,7 +800,7 @@ class VoiceHubSongClient:
 
         url = f"{self.config.voicehub_base_url}{SONG_SOURCES_PATH}"
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            async with make_session(self.timeout) as session:
                 async with session.get(
                     url, headers=self._headers(), allow_redirects=False
                 ) as response:
@@ -889,7 +890,7 @@ class VoiceHubSongClient:
 
         url = f"{self.config.voicehub_base_url}{PLAY_TIMES_PATH}"
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            async with make_session(self.timeout) as session:
                 async with session.get(
                     url, headers=self._headers(), allow_redirects=False
                 ) as response:

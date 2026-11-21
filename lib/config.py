@@ -126,6 +126,38 @@ def dropped_umo_values(value: Any, message_type: str) -> List[str]:
     return [item for item in _as_list(value) if umo_message_type(item) != message_type]
 
 
+def parse_font_urls(value: Any) -> Dict[str, List[str]]:
+    """解析字体下载源覆盖配置（``font_urls``）。
+
+    每行形如 ``regular=https://example.com/HarmonyOS_Sans_SC_Regular.ttf``，
+    也支持 ``regular=https://example.com/pkg.tgz#package/HarmonyOS_Sans_SC_Regular.ttf``
+    从 npm 归档里取成员。同一个键可写多行，按出现顺序作为回退链；内置的中国
+    大陆镜像与 jsDelivr/unpkg 仍排在配置源之后兜底。
+
+    Args:
+        value: 配置里的原始取值（多行文本或多行列表）。
+
+    Returns:
+        ``{"regular": [...], "bold": [...]}``，非法行被丢弃。
+    """
+    result: Dict[str, List[str]] = {"regular": [], "bold": []}
+    if isinstance(value, (list, tuple)):
+        lines = [str(item) for item in value]
+    else:
+        lines = str(value or "").splitlines()
+    for line in lines:
+        text = line.strip()
+        if not text or text.startswith("#") or "=" not in text:
+            continue
+        key, _, url = text.partition("=")
+        key = key.strip().lower()
+        url = url.strip()
+        if key not in result or not url.startswith(("http://", "https://")):
+            continue
+        if url not in result[key]:
+            result[key].append(url)
+    return result
+
 
 @dataclass
 class VoiceHubConfig:
@@ -161,6 +193,10 @@ class VoiceHubConfig:
 
     # 本周歌单输出形式：image = 按后台配置出图；text = 直接用 VoiceHub 生成的纯文本
     weekly_output_mode: str = "image"
+
+    # 字体：自定义字体目录（空=插件数据目录）与下载源覆盖（regular/bold 各一组 URL）
+    font_dir: str = ""
+    font_urls: Dict[str, List[str]] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, raw: Optional[Mapping[str, Any]]) -> "VoiceHubConfig":
@@ -198,6 +234,8 @@ class VoiceHubConfig:
                 "share_link_auto_resolve",
                 "share_link_passive_resolve",
                 "weekly_output_mode",
+                "font_dir",
+                "font_urls",
             ):
                 value = getattr(raw, "get", None)
                 if callable(value):
@@ -229,6 +267,8 @@ class VoiceHubConfig:
             share_link_passive_resolve=_as_bool(data.get("share_link_passive_resolve"), False),
             # 只有显式配置为 text 才走纯文本，其余取值一律回退图片
             weekly_output_mode="text" if str(data.get("weekly_output_mode") or "").strip().lower() == "text" else "image",
+            font_dir=str(data.get("font_dir") or "").strip(),
+            font_urls=parse_font_urls(data.get("font_urls")),
         )
 
     @property

@@ -134,8 +134,10 @@ AstrBot/.venv/bin/pip install -r astrbot_plugin_voicehub/requirements.txt
 - `share_link_auto_resolve`：默认关闭。开启后，私聊 `/广播 点歌` 的参数若是网易云音乐/QQ音乐/哔哩哔哩的分享链接（含 163cn.tv、b23.tv 短链），自动解析成单条候选，回复「/广播 选歌 1」完成点歌；关闭时链接文本按普通关键词搜索。
 - `share_link_passive_resolve`：默认关闭。开启后，私聊里**直接发送**音乐分享链接（无需任何指令）即自动解析成候选，回复「/广播 选歌 1」完成点歌；解析成功后本条消息会被终结，不再交给其他插件或 AI 处理，解析失败/非链接消息则照常放行。仅影响私聊；受 `song_enabled` 总开关约束。
 - `weekly_output_mode`：本周歌单输出形式，默认 `image`。`image` 按 VoiceHub 后台的显示项与排版配置出图；`text` 直接发送 VoiceHub 生成的纯文本。填其他值按 `image` 处理；单次强制文本可用 `/广播 本周歌单 文本`。
+- `font_dir`：字体目录，留空用插件数据目录（`~/.astrbot/data/plugin_data/astrbot_plugin_voicehub`）。填本地绝对路径可复用已有字体或做离线部署——把 `HarmonyOS_Sans_SC_Regular.ttf`、`HarmonyOS_Sans_SC_Bold.ttf` 放进该目录即不再联网下载。
+- `font_urls`：字体下载源覆盖（可选），每行 `regular=<URL>` / `bold=<URL>`，可写多行做回退；支持直链 `.ttf`，也支持 `https://.../fontpkg.tgz#package/HarmonyOS_Sans_SC_Regular.ttf` 形式从 npm 归档取成员。留空时使用内置源（见下）。
 
-首次生成歌单图片会自动下载 HarmonyOS Sans SC 字体到插件数据目录并缓存；若下载失败，指令会报错，请检查 AstrBot 出站网络后重试。无需额外部署浏览器或生图服务。
+首次生成歌单图片会自动下载 HarmonyOS Sans SC 字体并缓存。内置下载顺序以**中国大陆可达性**优先：npmmirror / 腾讯云 / 华为云的 npm 归档（整包含全部字重，两个字体共用一次下载）→ jsDelivr、unpkg（海外或可直连的环境）。每个源失败会退避重试，全部失败时报错会列出各源原因，并提示可手动把字体放进 `font_dir`，或改用 `font_urls` 指定自建镜像。无需额外部署浏览器或生图服务。
 
 生产环境请用 TLS 反向代理，不要在公网明文传输令牌。
 
@@ -314,7 +316,8 @@ VoiceHub 回调应返回 `{"success": true, "username": "可选名称"}` 或 `{"
 | VoiceHub 报 400「群会话未被管理员授权」 | 该群不在 VoiceHub 后台的群目标白名单里（或插件 `group_umos` 非空但不含它）。 |
 | 群推送收不到 | 按顺序查：① VoiceHub 后台「群聊推送」对应事件开关是否开启；② 群目标白名单里 UMO 是否正确（用 `/广播 状态` 取整串）；③ 是否被 CD 节流拦下（合并窗口内会延后投递）；④ 启动日志有无「形状非法，已忽略」告警；⑤ 插件 `group_umos` 是否非空且不含该群。 |
 | 拉取模式不工作 | 检查 `pull_interval_seconds` > 0、`voicehub_base_url` 与令牌齐全；VoiceHub 后台推送方向也必须为 `pull`。 |
-| `/广播 本周歌单` 提示字体下载失败 | 检查 AstrBot 容器访问字体 CDN 的出站网络和插件数据目录写权限，稍后重试。 |
+| `/广播 本周歌单` 提示字体下载失败 | 报错会列出每个下载源失败的原因。优先确认 AstrBot 容器出站网络与插件数据目录写权限；中国大陆网络下内置源已按 npmmirror/腾讯云/华为云优先排列。仍有问题可手动下载 `HarmonyOS_Sans_SC_Regular.ttf` / `HarmonyOS_Sans_SC_Bold.ttf` 放进 `font_dir`，或用 `font_urls` 指向自建镜像。 |
+| 提示「站点响应头过长，客户端无法解析」 | VoiceHub 开启 `nitro.timing` 后每个响应都带 `Server-Timing` 头，条目多时超过 8 KB。插件已放大解析上限并给出可读提示；根治办法是站点侧关闭 `nitro.timing`。 |
 | 歌单图片显示项与打印方案不一致 | 图片字段在 VoiceHub 后台「本周歌单图片显示项」单独设置，不读取浏览器本地打印方案。 |
 | 绑定失败「插件未配置 VoiceHub 站点地址」 | 填 `voicehub_base_url`。 |
 | 通知「发送成功」但没收到 | 适配器返回成功只说明 AstrBot 找到了对应平台实例，不保证第三方平台最终送达；用 `/广播 自检` 和 `/广播 状态` 先排除会话问题，再查平台侧限制。 |

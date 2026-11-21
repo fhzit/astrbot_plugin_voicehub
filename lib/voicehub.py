@@ -8,8 +8,11 @@ from typing import Any, Optional
 
 import aiohttp
 
+from astrbot.api import logger
+
 from .config import VoiceHubConfig, umo_message_type
 from .contract import BIND_PATH, UNBIND_PATH, VERIFY_TARGETS_PATH, WEEKLY_SCHEDULE_PATH, TOKEN_HEADER
+from .http import describe_client_error, log_network_error, make_session
 
 
 @dataclass
@@ -50,7 +53,7 @@ class VoiceHubClient:
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
 
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with make_session(timeout) as session:
                 async with session.post(url, json=payload, headers=headers, allow_redirects=False) as response:
                     if 300 <= response.status < 400:
                         return BindResult(ok=False, message="VoiceHub 回调拒绝重定向")
@@ -63,9 +66,11 @@ class VoiceHubClient:
                         username=body.get("username"),
                     )
         except aiohttp.ClientError as exc:
-            return BindResult(ok=False, message=f"无法连接 VoiceHub：{exc}")
+            log_network_error(logger, "绑定/解绑", exc, path)
+            return BindResult(ok=False, message=describe_client_error(exc))
         except Exception as exc:  # noqa: BLE001 - 插件侧不得因回调失败抛异常
-            return BindResult(ok=False, message=f"请求 VoiceHub 失败：{exc}")
+            log_network_error(logger, "绑定/解绑", exc, path)
+            return BindResult(ok=False, message="请求 VoiceHub 失败，请稍后重试")
 
     @staticmethod
     async def _read_json(response: aiohttp.ClientResponse) -> dict:
@@ -136,7 +141,7 @@ class VoiceHubClient:
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
         verified_ok = False
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with make_session(timeout) as session:
                 async with session.post(
                     f"{self.config.voicehub_base_url}{VERIFY_TARGETS_PATH}",
                     json={"umos": umos},
@@ -205,7 +210,7 @@ class VoiceHubClient:
         headers = {TOKEN_HEADER: self.config.voicehub_token}
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with make_session(timeout) as session:
                 async with session.get(
                     url, headers=headers, allow_redirects=False
                 ) as response:
@@ -225,6 +230,8 @@ class VoiceHubClient:
                         return {"ok": False, "message": self._error_message(body, response.status)}
                     return body
         except aiohttp.ClientError as exc:
-            return {"ok": False, "message": f"无法连接 VoiceHub：{exc}"}
+            log_network_error(logger, "本周排期", exc, WEEKLY_SCHEDULE_PATH)
+            return {"ok": False, "message": describe_client_error(exc)}
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "message": f"请求 VoiceHub 失败：{exc}"}
+            log_network_error(logger, "本周排期", exc, WEEKLY_SCHEDULE_PATH)
+            return {"ok": False, "message": "请求 VoiceHub 失败，请稍后重试"}

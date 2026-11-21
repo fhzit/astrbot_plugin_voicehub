@@ -18,6 +18,8 @@ from urllib.parse import urljoin
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
+from .http import make_session
+
 # ── 画布参数 ────────────────────────────────────────────────
 IMG_W        = 800
 PAD_H        = 40   # 左右 padding
@@ -152,7 +154,7 @@ async def _fetch_cover(url: str) -> Image.Image | None:
     if not url:
         return None
     try:
-        async with aiohttp.ClientSession(timeout=COVER_TIMEOUT) as session:
+        async with make_session(COVER_TIMEOUT) as session:
             async with session.get(url, allow_redirects=True) as resp:
                 if resp.status != 200:
                     return None

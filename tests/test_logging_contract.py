@@ -73,6 +73,6 @@ def test_pure_modules_take_logger_by_injection():
 def test_main_passes_logger_to_ensure_fonts():
     """调用点必须把框架 logger 传给 ensure_fonts。"""
     text = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert re.search(r"ensure_fonts\(\s*font_dir\s*,\s*logger\s*\)", text), (
+    assert re.search(r"ensure_fonts\(\s*font_dir\s*,\s*logger\b", text), (
         "main.py 调用 ensure_fonts 时应传入 logger"
     )

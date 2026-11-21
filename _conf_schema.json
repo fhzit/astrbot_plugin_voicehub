@@ -111,5 +111,17 @@
       "text"
     ],
     "hint": "image=按 VoiceHub 后台「本周歌单显示项」生成图片（含排版样式、列数、站点/学校 Logo）；text=直接发送 VoiceHub 生成的纯文本。留空或其他取值按 image 处理。单次强制文本：/广播 本周歌单 文本"
+  },
+  "font_dir": {
+    "description": "字体目录（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "留空时用插件数据目录（~/.astrbot/data/plugin_data/astrbot_plugin_voicehub）。需要离线部署或复用已有字体时填本地绝对路径，目录内放 HarmonyOS_Sans_SC_Regular.ttf 与 HarmonyOS_Sans_SC_Bold.ttf 即不再下载。"
+  },
+  "font_urls": {
+    "description": "字体下载源覆盖（可选）",
+    "type": "text",
+    "default": "",
+    "hint": "每行「字重=URL」，字重写 regular 或 bold，可写多行做回退。内置顺序为中国大陆优先（npmmirror/腾讯云/华为云 npm 归档）→ jsDelivr/unpkg，一般无需填写。自建镜像示例：regular=https://你的镜像/HarmonyOS_Sans_SC_Regular.ttf；也支持 npm 归档：regular=https://你的镜像/fontpkg.tgz#package/HarmonyOS_Sans_SC_Regular.ttf"
   }
 }

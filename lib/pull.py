@@ -17,6 +17,7 @@ import aiohttp
 
 from .config import VoiceHubConfig, parse_umo, umo_message_type
 from .contract import ACK_PATH, PULL_PATH, TOKEN_HEADER
+from .http import describe_client_error, make_session
 from .push import PushResult
 
 
@@ -169,7 +170,10 @@ class VoiceHubPullClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - 轮询不得因单次失败退出
-                self.logger.warning(f"[VoiceHub] 拉取通知失败: {exc}")
+                self.logger.warning(
+                    f"[VoiceHub] 拉取通知失败：{describe_client_error(exc)}"
+                )
+                self.logger.debug("[VoiceHub] 拉取通知失败详情：%r", exc)
             await asyncio.sleep(self.config.pull_interval_seconds)
 
     async def run_once(self) -> int:
@@ -180,7 +184,7 @@ class VoiceHubPullClient:
         """
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout_seconds)
         headers = {TOKEN_HEADER: self.config.voicehub_token}
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with make_session(timeout) as session:
             async with session.post(
                 f"{self.config.voicehub_base_url}{PULL_PATH}",
                 json={},

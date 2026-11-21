@@ -3,6 +3,16 @@
 本文件记录 astrbot_plugin_voicehub 的用户可感知变更。格式参照 Keep a Changelog，
 版本号递增遵循语义化。
 
+## [v0.0.8] - 2026-11-21
+
+### 修复
+- **字体下载（#1）**：改为多源回退，优先中国大陆可达的 npm 镜像（npmmirror / 腾讯云 / 华为云，整包含全部字重且两个字体共用一次下载），再回退 jsDelivr / unpkg；每个源失败按指数退避重试，下载后校验体积与 TTF/OTF 文件头，临时文件用唯一名并原子落盘，并发首次出图只下载一次。全部源失败时汇总各源原因并给出手动放置字体的目录，不再出现「字体下载失败，无法生成排期图片：」后为空。
+- **响应头超限（#2）**：插件内所有 aiohttp 请求改走统一会话工厂，显式放大 `max_line_size` / `max_field_size`（64 KB），修复 VoiceHub 开启 `nitro.timing` 导致 `Server-Timing` 头超过 8190 字节时 `/广播 本周歌单` 报「无法连接 VoiceHub：400」；网络失败改为可读提示，完整异常写日志。
+
+### 新增
+- 配置项 `font_dir`：自定义字体目录，可放预置字体实现离线部署。
+- 配置项 `font_urls`：覆盖或追加字体下载源，支持直链 `.ttf` 与 npm 归档成员（`https://.../pkg.tgz#package/HarmonyOS_Sans_SC_Regular.ttf`）。
+
 ## [v0.0.7] - 2026-10-10
 
 ### 新增
