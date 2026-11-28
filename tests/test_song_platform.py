@@ -337,14 +337,14 @@ def test_site_command_group_chat_refused():
 
 
 def test_render_song_list_hint_mentions_platform_flag():
-    """搜索列表尾部提示 -平台 参数的用法。"""
+    """搜索列表尾部提示换音源的写法（裸值 `.B站` / `-2`）。"""
     from lib.song import render_song_list
 
     text = render_song_list("miku", "bilibili", [
         SongCandidate(index=1, title="メリュー", artist="n-buna", duration_seconds=253),
     ])
-    assert "平台" in text
-    assert "-平台" in text
+    assert "-B站" in text
+    assert "-2" in text
 
 
 def test_format_platform_unknown_key_passthrough():

@@ -235,6 +235,29 @@ def test_parse_pick_args_accepts_chinese_keys_in_any_order():
     assert parse_pick_args("/广播 选歌 4 时段=1")[0].index == 4
 
 
+def test_parse_pick_args_accepts_bare_card_and_slot():
+    """不带键名的裸值：`-ABCD1234` 当券码、`-2` 当播出时段序号。"""
+    args, error = parse_pick_args("3 -ABCD1234 -2")
+    assert error == ""
+    assert (args.index, args.card_code, args.play_time_index) == (3, "ABCD1234", 2)
+
+    # 裸值券码与显式留言可共存，顺序无关
+    args, error = parse_pick_args("1 -abcd1234 -备注 生日快乐 送到高三")
+    assert error == ""
+    assert (args.index, args.card_code, args.note) == (1, "ABCD1234", "生日快乐 送到高三")
+
+    # 两种写法混用仍按同一个键去重
+    args, error = parse_pick_args("1 -ABCD1234 -点歌券 EF5678")
+    assert args is None and error == TEXT_PICK_INVALID
+
+
+@pytest.mark.parametrize("text", ["1 -a", "1 -中文券码", "1 -9", "1 -略去"])
+def test_parse_pick_args_rejects_unclassifiable_bare_values(text):
+    """既不像券码也不像时段序号的裸值直接报参数错误，不猜。"""
+    args, error = parse_pick_args(text)
+    assert args is None and error == TEXT_PICK_INVALID
+
+
 def test_parse_pick_args_accepts_english_aliases():
     """英文旧键 `time=` / `card=` 仍可解析（兼容旧写法）。"""
     args, error = parse_pick_args("3 time=2 card=ABCD1234")
@@ -369,8 +392,8 @@ def test_render_song_list_is_verbatim():
         "点歌搜索：告白气球（音源：网易云音乐）\n"
         "1. 告白气球 - 周杰伦（03:35）\n"
         "2. 无时长 - 某人（未知时长）\n"
-        "回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
-        "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
+        "回复「/选歌 序号」完成点歌（可选 -券码、-备注 留言）。\n"
+        "换音源可加 -序号 或 -名称，如 -2、-B站、-网易云。"
     )
 
 
@@ -384,7 +407,7 @@ def test_render_play_times_is_verbatim():
         "可选播出时段：\n"
         "1. 午间广播（12:00-12:30）\n"
         "2. 晚间广播（18:00-18:30）\n"
-        "回复「/选歌 序号 -时段 时段序号」选择时段。"
+        "回复「/选歌 序号 -时段序号」选择时段，如 /选歌 1 -2。"
     )
 
 
@@ -550,8 +573,8 @@ def test_search_renders_full_flow_through_service():
             "1. 告白气球 - 周杰伦（03:35）\n"
             "2. 晴天 - 周杰伦（04:29）\n"
             "3. 无时长 - 某人（未知时长）\n"
-            "回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
-            "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
+            "回复「/选歌 序号」完成点歌（可选 -券码、-备注 留言）。\n"
+            "换音源可加 -序号 或 -名称，如 -2、-B站、-网易云。"
         )
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
         assert stub.request_bodies == [{
@@ -602,6 +625,45 @@ def test_pick_maps_chinese_keys_to_body():
         ) == "点歌成功：告白气球 - 周杰伦"
         body = stub.request_bodies[0]
         assert (body["index"], body["playTimeId"], body["cardCode"]) == (2, 2, "ABCD1234")
+    finally:
+        stub.stop()
+
+
+def test_pick_accepts_bare_card_code_and_slot():
+    """投稿参数可省键名：`-ABCD1234` 券码、`-2` 时段。"""
+    stub = _StubSongApi().start()
+    try:
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球"))
+        assert asyncio.run(
+            service.pick(UMO, "", "2 -abcd1234 -2")
+        ) == "点歌成功：告白气球 - 周杰伦"
+        body = stub.request_bodies[0]
+        assert (body["index"], body["cardCode"], body["playTimeId"]) == (2, "ABCD1234", 2)
+    finally:
+        stub.stop()
+
+
+def test_song_accepts_bare_platform_name():
+    """`/点歌 告白气球 -QQ` 直接把裸值当音源，不需要 `-平台` 键。"""
+    stub = _StubSongApi().start()
+    try:
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球 -QQ"))
+        body = stub.search_bodies[0]
+        assert (body["keyword"], body["platform"]) == ("告白气球", "tencent")
+    finally:
+        stub.stop()
+
+
+def test_song_keeps_unknown_dash_token_in_keyword():
+    """解析不出音源的裸值留在关键词里，不误判成平台参数。"""
+    stub = _StubSongApi().start()
+    try:
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球 -live"))
+        body = stub.search_bodies[0]
+        assert (body["keyword"], body["platform"]) == ("告白气球 -live", "netease")
     finally:
         stub.stop()
 
@@ -719,7 +781,7 @@ def test_play_times_are_fetched_and_cached_in_session():
             "可选播出时段：\n"
             "1. 午间广播（12:00-12:30）\n"
             "2. 晚间广播（18:00-18:30）\n"
-            "回复「/选歌 序号 -时段 时段序号」选择时段。"
+            "回复「/选歌 序号 -时段序号」选择时段，如 /选歌 1 -2。"
         )
         asyncio.run(service.song(UMO, "", "告白气球"))
         asyncio.run(service.pick(UMO, "", "1 时段=1"))

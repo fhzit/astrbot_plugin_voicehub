@@ -92,10 +92,10 @@ PLATFORM_ALIASES: Dict[str, str] = {
 PICK_PLATFORM_KEYS = frozenset({"平台", "platform"})
 
 # 音源列表文案
-TEXT_PLATFORM_INVALID = "平台参数不正确：可用序号（站点启用顺序）或名称，如 B站、网易云、QQ音乐、咪咕。"
+TEXT_PLATFORM_INVALID = "平台参数不正确：可直接写 -B站、-网易云、-QQ音乐、-咪咕 或 -序号（站点启用顺序）。"
 
 # 分享链接解析文案
-TEXT_RESOLVE_OK_HINT = "回复「/选歌 1」完成点歌（可选 -点歌券 券码、-备注 留言）。"
+TEXT_RESOLVE_OK_HINT = "回复「/选歌 1」完成点歌（可选 -券码、-备注 留言）。"
 TEXT_RESOLVE_UNRECOGNIZED = "无法识别的分享链接，支持网易云音乐、QQ音乐、哔哩哔哩；也可以用 /点歌 关键词 搜索。"
 
 # 点歌地址文案
@@ -104,7 +104,7 @@ TEXT_SITE_NO_BASE_URL = "插件未配置 VoiceHub 站点地址。"
 
 # 手动投稿文案
 TEXT_PICK_MANUAL_USAGE = (
-    "用法：/选歌 手动 <歌名> -歌手 <歌手> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
+    "用法：/选歌 手动 <歌名> -歌手 <歌手> [-券码] [-时段 序号] [-备注 留言]。"
 )
 TEXT_PICK_MANUAL_ARTIST_REQUIRED = "手动投稿需要歌手：在歌名后加 -歌手 歌手名。"
 
@@ -123,19 +123,21 @@ RESET_CONFIRM_KEYWORDS = frozenset({"确认", "confirm"})
 # songRequestService 的 zod max 都是 300）
 MAX_KEYWORD_LENGTH = 100
 MAX_CARD_LENGTH = 100
+# 裸值参数（不带键名）至少这么长才按券码处理，避免把 -a 之类误判成券码
+BARE_CARD_MIN_LENGTH = 3
 MAX_NOTE_LENGTH = 300
 
 # 以下几条为规格未覆盖处的补充文案（见 README「点歌」一节）
 TEXT_SONG_DISABLED = "点歌功能未启用。"
-TEXT_USAGE_SONG = "用法：/点歌 <关键词> [-平台 平台序号|名称]（发送 /点歌 时段 查看播出时段）。"
-TEXT_USAGE_PICK = "用法：/选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/选歌 手动 <歌名> -歌手 <歌手>。"
+TEXT_USAGE_SONG = "用法：/点歌 <关键词> [-B站 或 -序号 指定音源]，如 /点歌 告白气球 -QQ音乐（发送 /点歌 时段 查看播出时段）。"
+TEXT_USAGE_PICK = "用法：/选歌 <序号> [-券码] [-时段 序号] [-备注 留言]，如 /选歌 3 -ABCD1234 -备注 生日快乐；手动投稿：/选歌 手动 <歌名> -歌手 <歌手>。"
 TEXT_PICK_INVALID = (
-    "点歌参数不正确。用法：/选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；"
-    "参数以 - 开头，顺序无关。"
+    "点歌参数不正确。用法：/选歌 <序号> [-券码] [-时段 序号] [-备注 留言]；"
+    "券码与时段直接写在参数里（-ABCD1234、-2），顺序无关。"
 )
 # 站点「强制使用点歌券投稿」时，插件在提交前拦下无券请求：站点对管理员账号豁免
 # 该限制，只靠服务端会出现「强制模式下仍能无券点歌」。
-TEXT_CARD_CODE_REQUIRED = "本站已启用仅点歌券投稿：请补充「-点歌券 券码」后重新提交。"
+TEXT_CARD_CODE_REQUIRED = "本站已启用仅点歌券投稿：请补充券码参数（如 -ABCD1234）后重新提交。"
 TEXT_PLAY_TIME_INVALID = "时段序号必须是 1-5 之间的整数。"
 TEXT_NOTE_EMPTY = "留言不能为空。"
 TEXT_NOTE_TOO_LONG = f"留言不能超过 {MAX_NOTE_LENGTH} 个字符。"
@@ -291,8 +293,8 @@ def render_song_list(keyword: str, platform: str, candidates: List[SongCandidate
             f"{candidate.index}. {candidate.title} - {candidate.artist}"
             f"（{format_duration(candidate.duration_seconds)}）"
         )
-    lines.append("回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。")
-    lines.append("换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。")
+    lines.append("回复「/选歌 序号」完成点歌（可选 -券码、-备注 留言）。")
+    lines.append("换音源可加 -序号 或 -名称，如 -2、-B站、-网易云。")
     return "\n".join(lines)
 
 
@@ -310,7 +312,7 @@ def render_play_times(play_times: List[PlayTime]) -> str:
     lines = ["可选播出时段："]
     for number, play_time in enumerate(play_times, start=1):
         lines.append(f"{number}. {play_time.name}（{_format_range(play_time)}）")
-    lines.append("回复「/选歌 序号 -时段 时段序号」选择时段。")
+    lines.append("回复「/选歌 序号 -时段序号」选择时段，如 /选歌 1 -2。")
     return "\n".join(lines)
 
 
@@ -364,6 +366,64 @@ def _parse_flag(
     return key, tokens[start + 1].strip(), start + 2, ""
 
 
+def _classify_bare_pick_value(value: str) -> Optional[str]:
+    """裸值参数（不带键名）的自动归类：返回 `time` / `card` / None。
+
+    `-2` 这类 1..5 的数字按播出时段序号处理；`-ABCD1234` 这类 ASCII 字母数字串
+    按点歌券码处理；其余（含中文、过长、过短）一律判为非法，避免把错别字
+    当成券码提交。
+    """
+    text = str(value or "").strip()
+    if not text or len(text) > MAX_CARD_LENGTH:
+        return None
+    if text.isdigit() and 1 <= int(text) <= MAX_RESULT_COUNT:
+        return "time"
+    if len(text) >= BARE_CARD_MIN_LENGTH and text.isascii() and text.isalnum():
+        return "card"
+    return None
+
+
+def _canonical_pick_key(key: str) -> str:
+    """把各种写法归一到标准键，保证 `-券码` 与 `-点歌券 券码` 互斥去重。"""
+    lowered = str(key or "").lower()
+    if lowered in PICK_PLAY_TIME_KEYS:
+        return "time"
+    if lowered in PICK_CARD_KEYS:
+        return "card"
+    if lowered in PICK_NOTE_KEYS:
+        return "note"
+    if lowered in PICK_ARTIST_KEYS:
+        return "artist"
+    return lowered
+
+
+def _parse_pick_token(
+    tokens: List[str], start: int
+) -> Tuple[Optional[str], Optional[str], int, str]:
+    """解析一条投稿参数，返回 `(键, 值, 下一个下标, 错误文案)`。
+
+    显式键（`-时段` / `-点歌券` / `-备注` / `-歌手`）走 `_parse_flag`；不带键名的
+    裸值（`-2` 时段、`-ABCD1234` 券码）由 `_classify_bare_pick_value` 归类后
+    映射成 `time` / `card` 标准键，下游按既有分支处理。
+    """
+    key = _strip_flag_prefix(tokens[start])
+    if key is None:
+        return None, None, start, TEXT_PICK_INVALID
+
+    lowered = key.lower()
+    if (lowered in PICK_PLAY_TIME_KEYS or lowered in PICK_CARD_KEYS
+            or lowered in PICK_NOTE_KEYS or lowered in PICK_ARTIST_KEYS):
+        parsed_key, value, cursor, error = _parse_flag(tokens, start)
+        if error:
+            return None, None, start, error
+        return _canonical_pick_key(parsed_key or ""), value, cursor, ""
+
+    kind = _classify_bare_pick_value(key)
+    if kind is None:
+        return None, None, start, TEXT_PICK_INVALID
+    return kind, key.strip(), start + 1, ""
+
+
 def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
     """解析 `/选歌` 的参数。
 
@@ -410,7 +470,7 @@ def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
             key, _, value = token.partition("=")
             key, value, cursor = key.strip().lower(), value.strip(), cursor + 1
         else:
-            key, value, cursor, error = _parse_flag(tokens, cursor)
+            key, value, cursor, error = _parse_pick_token(tokens, cursor)
             if error:
                 return None, error
             if key is None:
@@ -511,7 +571,7 @@ def _parse_manual_pick_args(tokens: List[str]) -> Tuple[Optional[PickArgs], str]
 
     while cursor < len(tokens):
         start = cursor
-        key, value, cursor, error = _parse_flag(tokens, cursor)
+        key, value, cursor, error = _parse_pick_token(tokens, cursor)
         if error:
             # `-歌手` 落在末尾没有值：给出手动投稿专属文案而非通用参数错误
             if error == TEXT_PICK_INVALID:
@@ -1075,7 +1135,7 @@ class SongService:
             )
             return render_resolved_song(outcome.platform, candidate)
 
-        # `-平台 平台|序号`：JVM 风格取值（取 -平台 后的下一个 token）。
+        # 平台参数两种写法：`-平台 QQ`（显式键）与直接裸写 `-QQ` / `-B站` / `-2`。
         platform_override: Optional[str] = None
         tokens = text.split()
         keep: List[str] = []
@@ -1094,6 +1154,18 @@ class SongService:
                 if resolved is None:
                     return TEXT_PLATFORM_INVALID
                 platform_override = resolved
+            elif key:
+                # 裸值：名称词或音源序号直接当平台；解析不出来就留在关键词里，
+                # 避免把带连字符的关键词当成平台参数。
+                bare = key.strip()
+                resolved = resolve_platform_argument(bare)
+                if resolved is None and bare.isdigit():
+                    resolved = await self.resolve_platform(bare)
+                if resolved is None:
+                    keep.append(token)
+                else:
+                    platform_override = resolved
+                cursor += 1
             else:
                 keep.append(token)
                 cursor += 1
