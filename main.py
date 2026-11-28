@@ -94,7 +94,7 @@ class VoiceHubPlugin(Star):
             if dropped:
                 logger.warning(
                     f"[VoiceHub] 以下群广播会话形状非法，已忽略：{dropped}。"
-                    "正确格式示例：default:GroupMessage:123456（请在群内发送 /广播 状态 取值）。"
+                    "正确格式示例：default:GroupMessage:123456（请在群内发送 /状态 取值）。"
                 )
 
         if self.plugin_config.pull_interval_seconds > 0:
@@ -129,16 +129,12 @@ class VoiceHubPlugin(Star):
     # 指令
     # ------------------------------------------------------------------
 
-    @filter.command_group("广播", alias={"vh"})
-    def vh(self):
-        """VoiceHub 相关指令组（`/广播`，兼容旧写法 `/vh`）。"""
-
-    @vh.command("绑定", alias={"bind"})
+    @filter.command("绑定", alias={"bind"})
     async def vh_bind(self, event: AstrMessageEvent, code: GreedyStr = ""):
         """绑定 VoiceHub 账号。
 
-        用法一：/广播 绑定 —— 机器人回复一次性确认链接，点开登录后确认即可。
-        用法二：/广播 绑定 <绑定码> —— 提交 VoiceHub 生成的一次性绑定码。
+        用法一：/绑定 —— 机器人回复一次性确认链接，点开登录后确认即可。
+        用法二：/绑定 <绑定码> —— 提交 VoiceHub 生成的一次性绑定码。
         """
         if not self.plugin_config.webhook_token:
             yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
@@ -159,7 +155,7 @@ class VoiceHubPlugin(Star):
 
         if len(code.split()) != 1:
             yield event.plain_result(
-                "用法：/广播 绑定（机器人回复确认链接）或 /广播 绑定 <绑定码>。"
+                "用法：/绑定（机器人回复确认链接）或 /绑定 <绑定码>。"
             )
             return
 
@@ -187,9 +183,9 @@ class VoiceHubPlugin(Star):
             "链接等同于本次会话的绑定凭证，不要转发给他人。"
         )
 
-    @vh.command("解绑", alias={"unbind"})
+    @filter.command("解绑", alias={"unbind"})
     async def vh_unbind(self, event: AstrMessageEvent):
-        """解绑当前会话：/广播 解绑"""
+        """解绑当前会话：/解绑"""
         if not self.plugin_config.webhook_token:
             yield event.plain_result("插件尚未配置推送令牌，请先在 AstrBot 插件配置中填写。")
             return
@@ -200,9 +196,9 @@ class VoiceHubPlugin(Star):
         else:
             yield event.plain_result(f"解绑失败：{result.message}")
 
-    @vh.command("状态", alias={"status"})
+    @filter.command("状态", alias={"status"})
     async def vh_status(self, event: AstrMessageEvent):
-        """查看当前会话的推送状态与会话 ID：/广播 状态"""
+        """查看当前会话的推送状态与会话 ID：/状态"""
         platform = event.get_platform_name()
         message_type = "群聊" if event.get_group_id() else "私聊"
         if self.pull_client:
@@ -219,9 +215,9 @@ class VoiceHubPlugin(Star):
             f"- 服务：{endpoint}"
         )
 
-    @vh.command("自检", alias={"test"})
+    @filter.command("自检", alias={"test"})
     async def vh_test(self, event: AstrMessageEvent):
-        """向当前会话发送一条测试通知：/广播 自检"""
+        """向当前会话发送一条测试通知：/自检"""
         result = await self.push_service.push_text(
             [event.unified_msg_origin],
             "VoiceHub 测试通知",
@@ -234,9 +230,9 @@ class VoiceHubPlugin(Star):
             f"测试推送完成：成功 {result.sent} 个会话，失败 {len(result.failed)} 个。"
         )
 
-    @vh.command("点歌", alias={"song"})
+    @filter.command("点歌", alias={"song"})
     async def vh_song(self, event: AstrMessageEvent, keyword: GreedyStr):
-        """搜索歌曲：/广播 点歌 <关键词> [-平台 序号|名称]"""
+        """搜索歌曲：/点歌 <关键词> [-平台 序号|名称]"""
         yield event.plain_result(await self.song_service.song(
             event.unified_msg_origin, event.get_group_id(), keyword
         ))
@@ -256,23 +252,23 @@ class VoiceHubPlugin(Star):
         yield event.plain_result(reply)
         event.stop_event()
 
-    @vh.command("点歌地址", alias={"site"})
+    @filter.command("点歌地址", alias={"site"})
     async def vh_site(self, event: AstrMessageEvent):
-        """查询点歌网站地址：/广播 点歌地址"""
+        """查询点歌网站地址：/点歌地址"""
         yield event.plain_result(await self.song_service.site(
             event.unified_msg_origin, event.get_group_id()
         ))
 
-    @vh.command("选歌", alias={"pick"})
+    @filter.command("选歌", alias={"pick"})
     async def vh_pick(self, event: AstrMessageEvent, args: GreedyStr):
-        """投稿歌曲：/广播 选歌 <序号> [选项]；手动投稿 /广播 选歌 手动 <歌名> -歌手 <歌手>"""
+        """投稿歌曲：/选歌 <序号> [选项]；手动投稿 /选歌 手动 <歌名> -歌手 <歌手>"""
         yield event.plain_result(await self.song_service.pick(
             event.unified_msg_origin, event.get_group_id(), args
         ))
 
-    @vh.command("重置密码", alias={"resetpassword"})
+    @filter.command("重置密码", alias={"resetpassword"})
     async def vh_reset_password(self, event: AstrMessageEvent, args: GreedyStr):
-        """重置密码（私聊专用，两步确认）：/广播 重置密码 <新密码>，5 分钟内回复 确认 <新密码>"""
+        """重置密码（私聊专用，两步确认）：/重置密码 <新密码>，5 分钟内回复 确认 <新密码>"""
         yield event.plain_result(await self.song_service.reset_password(
             event.unified_msg_origin, event.get_group_id(), args
         ))
@@ -300,9 +296,9 @@ class VoiceHubPlugin(Star):
             return True
         return self.plugin_config.weekly_output_mode == "text"
 
-    @vh.command("本周歌单", alias={"weekly"})
+    @filter.command("本周歌单", alias={"weekly"})
     async def vh_weekly(self, event: AstrMessageEvent, args: GreedyStr = ""):
-        """发送本周排期：/广播 本周歌单 [文本]
+        """发送本周排期：/本周歌单 [文本]
 
         默认按 VoiceHub 后台的显示项出图；加「文本」参数或改插件配置
         weekly_output_mode 可改发纯文本。

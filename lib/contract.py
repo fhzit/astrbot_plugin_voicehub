@@ -27,6 +27,9 @@ PASSWORD_RESET_PATH = "/api/bot/voicehub/password-reset"
 # 播出时段列表：站点既有的公开接口（与站点前端 RequestForm 同源）
 PLAY_TIMES_PATH = "/api/play-times"
 
+# 站点公开配置：读取「强制使用点歌券投稿」等投稿规则
+SITE_CONFIG_PATH = "/api/site-config"
+
 # 本周排期图片
 WEEKLY_SCHEDULE_PATH = "/api/bot/voicehub/weekly-schedule"
 

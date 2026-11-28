@@ -75,21 +75,21 @@ def test_group_umos_hint_warns_against_adapter_name_prefix():
 
 
 def test_readme_pick_examples_parse_with_the_implementation():
-    """README 里每个 `/广播 选歌` 示例都要能被真实解析器解析。
+    """README 里每个 `/选歌` 示例都要能被真实解析器解析。
 
     文档示例是操作者会逐字照抄的东西，与实现脱节时看起来像功能坏了。
     """
     from astrbot_plugin_voicehub.lib.song import parse_pick_args
 
     text = README.read_text(encoding="utf-8")
-    # 只取「/广播 选歌」开头、到行尾/反引号为止的示例；命令表里的 <序号> 是占位符，
+    # 只取「/选歌」开头、到行尾/反引号为止的示例；命令表里的 <序号> 是占位符，
     # 不是可直接照抄的调用
     examples = [
         example
-        for example in re.findall(r"`(/广播 选歌 [^`\n]+)`", text)
+        for example in re.findall(r"`(/选歌 [^`\n]+)`", text)
         if "<" not in example and "[" not in example
     ]
-    assert examples, "README 应给出 /广播 选歌 的示例"
+    assert examples, "README 应给出 /选歌 的示例"
     for example in examples:
         args, error = parse_pick_args(example)
         assert error == "", f"README 示例无法解析: {example} -> {error}"

@@ -2,7 +2,7 @@
 
 点歌是**私聊专用**的交互式流程：用户先搜索拿到候选列表（序号与密封票据都由
 VoiceHub 返回），再按序号投稿。插件侧只保留每个会话最近一次搜索的结果，供
-随后的 `/广播 选歌` 使用；票据本身由 VoiceHub 密封，插件无法伪造候选。
+随后的 `/选歌` 使用；票据本身由 VoiceHub 密封，插件无法伪造候选。
 
 会话状态只存在内存（AstrBot 重启即失效），与插件「不落盘业务状态」的定位一致。
 """
@@ -19,6 +19,7 @@ from .config import VoiceHubConfig
 from .contract import (
     PASSWORD_RESET_PATH,
     PLAY_TIMES_PATH,
+    SITE_CONFIG_PATH,
     SONG_REQUEST_PATH,
     SONG_RESOLVE_PATH,
     SONG_SEARCH_PATH,
@@ -46,12 +47,12 @@ PLATFORM_NAMES: Dict[str, str] = {
 
 DEFAULT_PLATFORM = "netease"
 
-# `/广播 点歌 <关键词>` 的保留字：查到时段列表而不是搜索歌曲
+# `/点歌 <关键词>` 的保留字：查到时段列表而不是搜索歌曲
 PLAY_TIME_KEYWORD = "时段"
 
 # 用户可见文案（逐字，除标注为补充的几条外均由实现规格规定）
 TEXT_GROUP_ONLY = "为避免刷屏，请在机器人私聊中点歌。"
-TEXT_NO_SESSION = "请先用「/广播 点歌 关键词」搜索歌曲。"
+TEXT_NO_SESSION = "请先用「/点歌 关键词」搜索歌曲。"
 TEXT_COOLDOWN = "点歌太频繁，请稍后再试。"
 TEXT_NO_BASE_URL = "插件未配置 VoiceHub 站点地址，无法点歌。"
 TEXT_NETWORK = "无法连接 VoiceHub，请稍后重试。"
@@ -59,7 +60,7 @@ TEXT_FAILED = "点歌失败，请稍后重试。"
 TEXT_NO_PLAY_TIME = "当前未开放播出时段选择。"
 TEXT_INDEX_INVALID = "序号必须是 1-5 之间的整数。"
 
-# `/广播 选歌` 的参数键名（中文为主，英文旧键仅作兼容别名）
+# `/选歌` 的参数键名（中文为主，英文旧键仅作兼容别名）
 PICK_PLAY_TIME_KEYS = frozenset({"时段", "time"})
 PICK_CARD_KEYS = frozenset({"点歌券", "card"})
 PICK_NOTE_KEYS = frozenset({"备注", "note", "留言"})
@@ -94,8 +95,8 @@ PICK_PLATFORM_KEYS = frozenset({"平台", "platform"})
 TEXT_PLATFORM_INVALID = "平台参数不正确：可用序号（站点启用顺序）或名称，如 B站、网易云、QQ音乐、咪咕。"
 
 # 分享链接解析文案
-TEXT_RESOLVE_OK_HINT = "回复「/广播 选歌 1」完成点歌（可选 -点歌券 券码、-备注 留言）。"
-TEXT_RESOLVE_UNRECOGNIZED = "无法识别的分享链接，支持网易云音乐、QQ音乐、哔哩哔哩；也可以用 /广播 点歌 关键词 搜索。"
+TEXT_RESOLVE_OK_HINT = "回复「/选歌 1」完成点歌（可选 -点歌券 券码、-备注 留言）。"
+TEXT_RESOLVE_UNRECOGNIZED = "无法识别的分享链接，支持网易云音乐、QQ音乐、哔哩哔哩；也可以用 /点歌 关键词 搜索。"
 
 # 点歌地址文案
 TEXT_SITE_GROUP_ONLY = "为避免刷屏，请在机器人私聊中查询点歌地址。"
@@ -103,18 +104,18 @@ TEXT_SITE_NO_BASE_URL = "插件未配置 VoiceHub 站点地址。"
 
 # 手动投稿文案
 TEXT_PICK_MANUAL_USAGE = (
-    "用法：/广播 选歌 手动 <歌名> -歌手 <歌手> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
+    "用法：/选歌 手动 <歌名> -歌手 <歌手> [-时段 时段序号] [-点歌券 券码] [-备注 留言]。"
 )
 TEXT_PICK_MANUAL_ARTIST_REQUIRED = "手动投稿需要歌手：在歌名后加 -歌手 歌手名。"
 
 # 重置密码文案
 TEXT_RESET_GROUP_ONLY = "为保护账号安全，重置密码仅在机器人私聊可用。"
-TEXT_RESET_USAGE = "用法：/广播 重置密码 <新密码>，随后 5 分钟内回复 /广播 重置密码 确认 <新密码>。"
+TEXT_RESET_USAGE = "用法：/重置密码 <新密码>，随后 5 分钟内回复 /重置密码 确认 <新密码>。"
 TEXT_RESET_CONFIRM_USAGE = (
-    "请回复：/广播 重置密码 确认 <新密码>（与第一步输入完全相同，5 分钟内有效）。"
+    "请回复：/重置密码 确认 <新密码>（与第一步输入完全相同，5 分钟内有效）。"
 )
-TEXT_RESET_MISMATCH = "两次输入的新密码不一致，已取消本次重置；请重新发起：/广播 重置密码 <新密码>。"
-TEXT_RESET_CONFIRM_INVALID = "确认已过期或不正确，请重新发起：/广播 重置密码 <新密码>。"
+TEXT_RESET_MISMATCH = "两次输入的新密码不一致，已取消本次重置；请重新发起：/重置密码 <新密码>。"
+TEXT_RESET_CONFIRM_INVALID = "确认已过期或不正确，请重新发起：/重置密码 <新密码>。"
 # 重置密码确认保留字
 RESET_CONFIRM_KEYWORDS = frozenset({"确认", "confirm"})
 
@@ -126,16 +127,19 @@ MAX_NOTE_LENGTH = 300
 
 # 以下几条为规格未覆盖处的补充文案（见 README「点歌」一节）
 TEXT_SONG_DISABLED = "点歌功能未启用。"
-TEXT_USAGE_SONG = "用法：/广播 点歌 <关键词> [-平台 平台序号|名称]（发送 /广播 点歌 时段 查看播出时段）。"
-TEXT_USAGE_PICK = "用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/广播 选歌 手动 <歌名> -歌手 <歌手>。"
+TEXT_USAGE_SONG = "用法：/点歌 <关键词> [-平台 平台序号|名称]（发送 /点歌 时段 查看播出时段）。"
+TEXT_USAGE_PICK = "用法：/选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；手动投稿：/选歌 手动 <歌名> -歌手 <歌手>。"
 TEXT_PICK_INVALID = (
-    "点歌参数不正确。用法：/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；"
+    "点歌参数不正确。用法：/选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]；"
     "参数以 - 开头，顺序无关。"
 )
+# 站点「强制使用点歌券投稿」时，插件在提交前拦下无券请求：站点对管理员账号豁免
+# 该限制，只靠服务端会出现「强制模式下仍能无券点歌」。
+TEXT_CARD_CODE_REQUIRED = "本站已启用仅点歌券投稿：请补充「-点歌券 券码」后重新提交。"
 TEXT_PLAY_TIME_INVALID = "时段序号必须是 1-5 之间的整数。"
 TEXT_NOTE_EMPTY = "留言不能为空。"
 TEXT_NOTE_TOO_LONG = f"留言不能超过 {MAX_NOTE_LENGTH} 个字符。"
-TEXT_PLAY_TIME_MISSING = "找不到该播出时段，请先发送「/广播 点歌 时段」查看。"
+TEXT_PLAY_TIME_MISSING = "找不到该播出时段，请先发送「/点歌 时段」查看。"
 
 
 @dataclass
@@ -220,7 +224,7 @@ class PlayTimeOutcome:
 
 @dataclass
 class PickArgs:
-    """`/广播 选歌` 的解析结果。"""
+    """`/选歌` 的解析结果。"""
 
     index: int
     play_time_index: Optional[int] = None
@@ -287,7 +291,7 @@ def render_song_list(keyword: str, platform: str, candidates: List[SongCandidate
             f"{candidate.index}. {candidate.title} - {candidate.artist}"
             f"（{format_duration(candidate.duration_seconds)}）"
         )
-    lines.append("回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。")
+    lines.append("回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。")
     lines.append("换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。")
     return "\n".join(lines)
 
@@ -302,11 +306,11 @@ def render_resolved_song(platform: str, candidate: SongCandidate) -> str:
 
 
 def render_play_times(play_times: List[PlayTime]) -> str:
-    """渲染播出时段列表（编号即 `/广播 选歌 序号 -时段 N` 里的 N）。"""
+    """渲染播出时段列表（编号即 `/选歌 序号 -时段 N` 里的 N）。"""
     lines = ["可选播出时段："]
     for number, play_time in enumerate(play_times, start=1):
         lines.append(f"{number}. {play_time.name}（{_format_range(play_time)}）")
-    lines.append("回复「/广播 选歌 序号 -时段 时段序号」选择时段。")
+    lines.append("回复「/选歌 序号 -时段 时段序号」选择时段。")
     return "\n".join(lines)
 
 
@@ -361,7 +365,7 @@ def _parse_flag(
 
 
 def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
-    """解析 `/广播 选歌` 的参数。
+    """解析 `/选歌` 的参数。
 
     参数以 `-` 开头（JVM 风格 `-键 值`，`--` 前缀等价），键名以中文为准：
     `-时段` 播出时段序号、`-点歌券` 券码、`-备注` 留言；英文旧键 `-time` /
@@ -372,15 +376,15 @@ def parse_pick_args(text: Any) -> Tuple[Optional[PickArgs], str]:
     兼容旧写法：`时段=2` / `点歌券=X` / `备注=Y` 仍可解析，与 `-` 写法等价。
 
     Args:
-        text: 指令参数原文，可含 `/广播 选歌` 或 `/vh pick` 前缀。
+        text: 指令参数原文，可含 `/选歌` 或 `/pick` 前缀。
 
     Returns:
         `(PickArgs, "")`，或 `(None, 错误文案)`。
     """
     raw = str(text or "").strip()
     tokens = raw.split()
-    # 容忍参数里带上指令名本身（中文指令名或旧英文名）
-    while tokens and tokens[0] in {"广播", "vh", "/广播", "/vh", "选歌", "pick"}:
+    # 容忍参数里带上指令名本身（中文指令名或旧英文名，含已废弃的 `/广播` 写法）
+    while tokens and tokens[0] in {"广播", "vh", "/广播", "/vh", "选歌", "/选歌", "pick", "/pick"}:
         tokens.pop(0)
     if not tokens:
         return None, TEXT_INDEX_INVALID
@@ -914,6 +918,31 @@ class VoiceHubSongClient:
         play_times = parse_play_times(body.get("playTimes")) if enabled else []
         return PlayTimeOutcome(ok=True, message="", enabled=enabled, play_times=play_times)
 
+    async def fetch_card_requirement(self) -> Optional[bool]:
+        """读取站点公开配置，判断投稿是否强制使用点歌券。
+
+        站点对拥有 `songs:bypass-limits` 的账号豁免「强制点歌券」，因此仅在服务端
+        拦截时，绑定管理员账号的会话仍可无券投稿。插件侧用本接口自行判定并前置拦截。
+
+        Returns:
+            True 表示强制；False 表示不强制；None 表示读取失败（按不强制处理，
+            由服务端裁决，避免配置接口抖动导致正常投稿被卡）。
+        """
+        if not self.config.voicehub_base_url:
+            return None
+
+        url = f"{self.config.voicehub_base_url}{SITE_CONFIG_PATH}"
+        try:
+            async with make_session(self.timeout) as session:
+                async with session.get(url, allow_redirects=False) as response:
+                    if response.status != 200:
+                        return None
+                    body = await self._read_json(response)
+        except Exception:  # noqa: BLE001 - 配置读取失败不得影响投稿链路
+            return None
+
+        return body.get("requireCardCodeForRequests") is True
+
 
 def parse_candidates(raw_items: Any) -> List[SongCandidate]:
     """解析搜索响应的候选列表，丢弃形状非法的条目。
@@ -976,7 +1005,7 @@ def parse_play_times(raw_items: Any) -> List[PlayTime]:
 
 
 class SongService:
-    """把 `/vh song`、`/vh song time`、`/vh pick` 映射为 VoiceHub 调用。"""
+    """把 `/song`、`/song time`、`/pick` 映射为 VoiceHub 调用。"""
 
     def __init__(
         self,
@@ -996,6 +1025,9 @@ class SongService:
         # 音源启用列表缓存：(时间戳, sources)。列表很少变，缓存 5 分钟。
         self._sources_cache: Optional[tuple] = None
         self._sources_ttl_seconds = 300.0
+        # 站点投稿规则缓存：(时间戳, 是否强制点歌券)。规则很少变，缓存 60 秒。
+        self._card_requirement_cache: Optional[tuple] = None
+        self._card_requirement_ttl_seconds = 60.0
 
     # -- 会话状态 ------------------------------------------------------
 
@@ -1012,7 +1044,7 @@ class SongService:
     # -- 指令入口 ------------------------------------------------------
 
     async def song(self, umo: str, group_id: str, keyword: str) -> str:
-        """`/广播 点歌 <关键词> [-平台 平台|序号]`（`时段` 为保留字）。"""
+        """`/点歌 <关键词> [-平台 平台|序号]`（`时段` 为保留字）。"""
         refusal = self._guard(umo, group_id)
         if refusal:
             return refusal
@@ -1121,7 +1153,7 @@ class SongService:
         return render_resolved_song(outcome.platform, candidate)
 
     async def site(self, umo: str, group_id: str) -> str:
-        """`/广播 点歌地址`：回复配置的站点地址（仅私聊）。"""
+        """`/点歌地址`：回复配置的站点地址（仅私聊）。"""
         del umo  # 点歌地址不依赖会话状态
         if group_id:
             return TEXT_SITE_GROUP_ONLY
@@ -1154,7 +1186,7 @@ class SongService:
         return resolve_platform_argument(text)
 
     async def song_time(self, umo: str, group_id: str) -> str:
-        """`/vh song time`：列出可选播出时段。"""
+        """`/song time`：列出可选播出时段。"""
         refusal = self._guard(umo, group_id)
         if refusal:
             return refusal
@@ -1173,7 +1205,7 @@ class SongService:
         return render_play_times(outcome.play_times)
 
     async def pick(self, umo: str, group_id: str, raw_args: str) -> str:
-        """`/广播 选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]`。"""
+        """`/选歌 <序号> [-时段 时段序号] [-点歌券 券码] [-备注 留言]`。"""
         refusal = self._guard(umo, group_id)
         if refusal:
             return refusal
@@ -1187,6 +1219,10 @@ class SongService:
 
         # 手动投稿：无需点歌会话（没有搜索结果的票据），直接走 manual 分支
         if args.manual is not None:
+            # 站点强制点歌券时插件侧先拦下：站点只按权限豁免管理员，绑定管理员
+            # 账号的会话在服务端不会被拦，会造成「强制模式仍能无券点歌」。
+            if not args.card_code and await self._card_code_required():
+                return TEXT_CARD_CODE_REQUIRED
             outcome = await self._call(self.client.request_song_manual(
                 umo,
                 title=args.manual["title"],
@@ -1211,6 +1247,9 @@ class SongService:
             if play_time_id is None:
                 return TEXT_PLAY_TIME_MISSING
 
+        if not args.card_code and await self._card_code_required():
+            return TEXT_CARD_CODE_REQUIRED
+
         # 通过全部前置校验后才记录投稿时刻：被拒绝的尝试不应延长冷却。
         self._last_pick[umo] = self._now()
 
@@ -1229,7 +1268,7 @@ class SongService:
         return outcome.message or TEXT_FAILED
 
     async def reset_password(self, umo: str, group_id: str, raw_args: str) -> str:
-        """`/广播 重置密码 <新密码>` 与 `确认 <新密码>`（两步确认，私聊专用）。"""
+        """`/重置密码 <新密码>` 与 `确认 <新密码>`（两步确认，私聊专用）。"""
         if group_id:
             # 群聊拒绝不读参数：避免新密码出现在群消息上下文
             return TEXT_RESET_GROUP_ONLY
@@ -1295,6 +1334,27 @@ class SongService:
         """同一会话两次投稿之间的最小间隔。"""
         last = self._last_pick.get(umo)
         return last is not None and (self._now() - last) < PICK_COOLDOWN_SECONDS
+
+    async def _card_code_required(self) -> bool:
+        """站点是否强制投稿使用点歌券。
+
+        读取失败按「不强制」处理并交给服务端裁决；成功结果缓存
+        `_card_requirement_ttl_seconds`，避免每次投稿都多打一次配置接口。
+        """
+        fetch = getattr(self.client, "fetch_card_requirement", None)
+        if fetch is None:
+            return False
+
+        cached = self._card_requirement_cache
+        if cached is not None and (self._now() - cached[0]) < self._card_requirement_ttl_seconds:
+            return bool(cached[1])
+
+        required = await self._call(fetch())
+        if required is None:
+            self._card_requirement_cache = None
+            return False
+        self._card_requirement_cache = (self._now(), bool(required))
+        return bool(required)
 
     async def _resolve_play_time(
         self, umo: str, session: SongSession, play_time_index: int

@@ -27,8 +27,12 @@ def _install_astrbot_stubs() -> None:
             return fn
         return decorate
 
+    def command(name, **kwargs):  # noqa: ARG001 - 顶层指令，桩不透传注册信息
+        return lambda method: method
+
     event.filter = types.SimpleNamespace(
         command_group=command_group,
+        command=command,
         custom_filter=lambda *args, **kwargs: (lambda method: method),
         event_message_type=lambda *args, **kwargs: (lambda method: method),
         EventMessageType=types.SimpleNamespace(ALL=3, GROUP_MESSAGE=1, PRIVATE_MESSAGE=2),

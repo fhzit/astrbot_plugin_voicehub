@@ -828,7 +828,7 @@ def test_passive_resolve_command_text_not_intercepted():
     """以「/」开头的消息在过滤器层就不会进被动解析（防与指令双触发）。"""
     from astrbot_plugin_voicehub.lib.song import looks_like_share_link
 
-    text = "/广播 点歌 https://music.163.com/song?id=186016"
+    text = "/点歌 https://music.163.com/song?id=186016"
     # 过滤器判定逻辑与 main._ShareLinkFilter.filter 保持一致：指令放行
     assert text.startswith("/")
     assert looks_like_share_link(text)  # 指令参数里的链接仍由点歌指令处理

@@ -41,13 +41,11 @@ def test_english_names_are_only_aliases():
         assert f'"{name}"' in joined, f"英文旧名未作为别名保留: {name}"
 
 
-def test_command_group_is_chinese_with_vh_alias():
-    """指令组注册为中文「广播」，并保留 `vh` 别名。"""
+def test_commands_are_registered_at_top_level():
+    """指令直接挂在顶层：不再需要 `/广播` 或 `/vh` 前缀。"""
     text = MAIN.read_text(encoding="utf-8")
-    assert 'command_group("广播"' in text, "指令组名应为中文「广播」"
-    match = re.search(r"command_group\(\s*\"广播\"\s*,\s*alias=\{([^}]*)\}", text)
-    assert match is not None, "指令组应带 alias 参数"
-    assert '"vh"' in match.group(1), "指令组应保留 vh 别名"
+    assert "command_group(" not in text, "指令组已移除，指令应直接挂在顶层"
+    assert "/广播" not in text, "main.py 不应再出现旧前缀 /广播"
 
 
 def test_readme_recommends_chinese_commands():
@@ -55,7 +53,7 @@ def test_readme_recommends_chinese_commands():
     text = README.read_text(encoding="utf-8")
 
     for name in CHINESE_COMMAND_NAMES:
-        assert f"/广播 {name}" in text, f"README 缺少中文指令: /广播 {name}"
+        assert f"/{name}" in text, f"README 缺少中文指令: /{name}"
 
     for name in RETIRED_COMMAND_NAMES:
         legacy = f"/vh {name}"
@@ -70,4 +68,4 @@ def test_schema_hint_points_to_chinese_status_command():
     assert "/vh status" not in raw, "配置提示仍指向旧写法 /vh status"
     schema = json.loads(raw)
     hints = [value.get("hint", "") for value in schema.values()]
-    assert any("/广播 状态" in hint for hint in hints), "配置提示应指向 /广播 状态"
+    assert any("/状态" in hint for hint in hints), "配置提示应指向 /状态"

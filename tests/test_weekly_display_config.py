@@ -204,12 +204,12 @@ def test_weekly_command_uses_plain_text_when_requested(plugin):
 
         # 配置为文本模式
         p.plugin_config.weekly_output_mode = "text"
-        results = [item async for item in p.vh_weekly(FakeEvent("/广播 本周歌单"), "")]
+        results = [item async for item in p.vh_weekly(FakeEvent("/本周歌单"), "")]
         assert results and "告白气球" in results[0]
 
         # 参数显式指定文本模式同样生效（即使配置为图片）
         p.plugin_config.weekly_output_mode = "image"
-        results = [item async for item in p.vh_weekly(FakeEvent("/广播 本周歌单 文本"), "文本")]
+        results = [item async for item in p.vh_weekly(FakeEvent("/本周歌单 文本"), "文本")]
         assert results and "告白气球" in results[0]
     asyncio.run(run())
 

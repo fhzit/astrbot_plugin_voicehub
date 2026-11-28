@@ -25,6 +25,7 @@ def plugin():
         return decorate
     event.filter = types.SimpleNamespace(
         command_group=group,
+        command=lambda name, **options: (lambda method: method),
         custom_filter=lambda *args, **kwargs: lambda method: method,
         event_message_type=lambda *args, **kwargs: lambda method: method,
         EventMessageType=types.SimpleNamespace(ALL=3, GROUP_MESSAGE=1, PRIVATE_MESSAGE=2),

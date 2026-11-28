@@ -21,6 +21,7 @@ from astrbot_plugin_voicehub.lib.song import (
     SongCandidate,
     SongSearchOutcome,
     SongService,
+    TEXT_CARD_CODE_REQUIRED,
     TEXT_NOTE_EMPTY,
     TEXT_NOTE_TOO_LONG,
     TEXT_PICK_INVALID,
@@ -37,7 +38,7 @@ UMO = "aiocqhttp:FriendMessage:user1"
 GROUP = "123456789"
 
 TEXT_GROUP_ONLY = "为避免刷屏，请在机器人私聊中点歌。"
-TEXT_NO_SESSION = "请先用「/广播 点歌 关键词」搜索歌曲。"
+TEXT_NO_SESSION = "请先用「/点歌 关键词」搜索歌曲。"
 TEXT_COOLDOWN = "点歌太频繁，请稍后再试。"
 TEXT_NO_BASE_URL = "插件未配置 VoiceHub 站点地址，无法点歌。"
 TEXT_NETWORK = "无法连接 VoiceHub，请稍后重试。"
@@ -87,6 +88,11 @@ class _StubSongApi:
                 {"id": 2, "name": "晚间广播", "startTime": "18:00", "endTime": "18:30", "enabled": True},
             ],
         }
+        self.site_config_status = 200
+        self.site_config_response = {
+            "enableCardCodeRequests": True,
+            "requireCardCodeForRequests": False,
+        }
         self._server = None
         self._thread = None
 
@@ -110,6 +116,9 @@ class _StubSongApi:
                 outer.paths.append(self.path)
                 if self.path.endswith("/play-times"):
                     self._send(outer.play_times_status, outer.play_times_response)
+                    return
+                if self.path.endswith("/api/site-config"):
+                    self._send(outer.site_config_status, outer.site_config_response)
                     return
                 self._send(404, {"success": False, "message": "not found"})
 
@@ -360,7 +369,7 @@ def test_render_song_list_is_verbatim():
         "点歌搜索：告白气球（音源：网易云音乐）\n"
         "1. 告白气球 - 周杰伦（03:35）\n"
         "2. 无时长 - 某人（未知时长）\n"
-        "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
+        "回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
         "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
     )
 
@@ -375,7 +384,7 @@ def test_render_play_times_is_verbatim():
         "可选播出时段：\n"
         "1. 午间广播（12:00-12:30）\n"
         "2. 晚间广播（18:00-18:30）\n"
-        "回复「/广播 选歌 序号 -时段 时段序号」选择时段。"
+        "回复「/选歌 序号 -时段 时段序号」选择时段。"
     )
 
 
@@ -541,7 +550,7 @@ def test_search_renders_full_flow_through_service():
             "1. 告白气球 - 周杰伦（03:35）\n"
             "2. 晴天 - 周杰伦（04:29）\n"
             "3. 无时长 - 某人（未知时长）\n"
-            "回复「/广播 选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
+            "回复「/选歌 序号」完成点歌（可选 -点歌券 券码、-备注 留言）。\n"
             "换音源可加 -平台：序号或名称，如 -平台 2、-平台 B站、-平台 网易云。"
         )
         assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
@@ -610,6 +619,81 @@ def test_english_alias_keys_map_to_same_body():
         stub.stop()
 
 
+def _require_cards(stub):
+    """把桩站点切到「强制使用点歌券」。"""
+    stub.site_config_response = {
+        "enableCardCodeRequests": True,
+        "requireCardCodeForRequests": True,
+    }
+
+
+def test_pick_without_card_code_is_refused_when_site_requires_cards():
+    """站点强制点歌券时，不带券的选歌与手动投稿都在插件侧拒绝，且不发投稿请求。"""
+    stub = _StubSongApi().start()
+    try:
+        _require_cards(stub)
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球"))
+
+        assert asyncio.run(service.pick(UMO, "", "1")) == TEXT_CARD_CODE_REQUIRED
+        assert asyncio.run(service.pick(UMO, "", "手动 阴天 -歌手 莫文蔚")) == TEXT_CARD_CODE_REQUIRED
+        assert stub.request_bodies == []
+        assert not any(path.endswith("/song-request") for path in stub.paths)
+    finally:
+        stub.stop()
+
+
+def test_pick_with_card_code_still_submits_when_site_requires_cards():
+    """强制点歌券下带券投稿照常提交，券码大写化后下发。"""
+    stub = _StubSongApi().start()
+    try:
+        _require_cards(stub)
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球"))
+
+        assert asyncio.run(service.pick(UMO, "", "1 点歌券=abcd1234")) == "点歌成功：告白气球 - 周杰伦"
+        assert stub.request_bodies[0]["cardCode"] == "ABCD1234"
+    finally:
+        stub.stop()
+
+
+def test_card_requirement_read_failure_does_not_block_pick():
+    """配置接口读取失败时按不强制处理，投稿交给服务端裁决，不误伤正常点歌。"""
+    stub = _StubSongApi().start()
+    try:
+        stub.site_config_status = 500
+        service = SongService(_config(stub.base_url))
+        asyncio.run(service.song(UMO, "", "告白气球"))
+
+        assert asyncio.run(service.pick(UMO, "", "1")) == "点歌成功：告白气球 - 周杰伦"
+        assert "cardCode" not in stub.request_bodies[0]
+    finally:
+        stub.stop()
+
+
+def test_card_requirement_is_cached_between_picks():
+    """强制点歌券判定按 TTL 缓存，连续投稿只读一次站点配置。"""
+    stub = _StubSongApi().start()
+    clock = [1000.0]
+    try:
+        _require_cards(stub)
+        service = SongService(_config(stub.base_url), now=lambda: clock[0])
+        asyncio.run(service.song(UMO, "", "告白气球"))
+
+        card_config_reads = lambda: sum(1 for path in stub.paths if path.endswith("/api/site-config"))
+        asyncio.run(service.pick(UMO, "", "1"))
+        clock[0] += 1.0
+        asyncio.run(service.pick(UMO, "", "1"))
+        assert card_config_reads() == 1
+
+        # 超过 TTL 后重新读取
+        clock[0] += 61.0
+        asyncio.run(service.pick(UMO, "", "1"))
+        assert card_config_reads() == 2
+    finally:
+        stub.stop()
+
+
 def test_play_time_index_uses_real_ids_not_positions():
     """时段 id 与展示序号不一致时，必须换算成真实 id。"""
     stub = _StubSongApi().start()
@@ -635,7 +719,7 @@ def test_play_times_are_fetched_and_cached_in_session():
             "可选播出时段：\n"
             "1. 午间广播（12:00-12:30）\n"
             "2. 晚间广播（18:00-18:30）\n"
-            "回复「/广播 选歌 序号 -时段 时段序号」选择时段。"
+            "回复「/选歌 序号 -时段 时段序号」选择时段。"
         )
         asyncio.run(service.song(UMO, "", "告白气球"))
         asyncio.run(service.pick(UMO, "", "1 时段=1"))
